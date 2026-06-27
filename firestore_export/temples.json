@@ -1,0 +1,23 @@
+[
+  {
+    "id": "Shirdi",
+    "temple_name": "Shirdi",
+    "total_capacity": 20,
+    "available_rooms": 14,
+    "maintenance_rooms": 2
+  },
+  {
+    "id": "Srisailam",
+    "temple_name": "Srisailam",
+    "total_capacity": 35,
+    "available_rooms": 24,
+    "maintenance_rooms": 1
+  },
+  {
+    "id": "Tirupati",
+    "temple_name": "Tirupati",
+    "total_capacity": 15,
+    "available_rooms": 9,
+    "maintenance_rooms": 0
+  }
+]
