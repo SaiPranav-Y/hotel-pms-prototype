@@ -1,0 +1,25 @@
+# Secrets
+firebase-key.json
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Build artifacts
+dist/
+build/
+*.spec
+*.exe
+
+# Recordings (large binary files)
+recordings/*.webm
+recordings/*.mp3
+recordings/*.wav
+
+# IDE
+.vscode/
+.idea/
