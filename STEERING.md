@@ -68,6 +68,16 @@
 - [x] Error recovery: "I apologize, could you repeat that?"
 - [x] Graceful busy signal when at capacity
 
+### Phase 5: Community, Payments & Donations ✅
+- [x] Gotram eligibility — MANDATORY field on every reservation/booking
+- [x] Approved gotram list (file/Firestore/default) with fuzzy matching
+- [x] Mandatory field validation: name, gotram, location, room type, stay span
+- [x] Razorpay room payment link (fixed amount from room total)
+- [x] Donations — flexible (any amount) + 6 fixed seva plans
+- [x] WhatsApp confirmation with payment + donation links
+- [x] Dashboard: Gotram column, Payments/Donations/Gotrams tabs, revenue stats
+- [x] 39 automated tests passing (27 core + 12 payment/gotram)
+
 ---
 
 ## 4. Directory Structure

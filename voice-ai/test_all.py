@@ -82,6 +82,7 @@ def t_kb_booking():
         check_in=date.today() + timedelta(days=5),
         check_out=date.today() + timedelta(days=7),
         num_rooms=1, num_guests=2, customer_age="35",
+        gotram="Bharadwaja",
     )
     assert r["success"] == True, f"Booking failed: {r}"
     bid = r["booking_id"]

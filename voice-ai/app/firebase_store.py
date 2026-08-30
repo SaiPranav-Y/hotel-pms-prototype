@@ -95,13 +95,18 @@ def save_booking_to_firebase(booking: dict) -> bool:
             "customer_name": booking.get("customer_name", ""),
             "customer_phone": booking.get("customer_phone", ""),
             "customer_age": int(booking.get("customer_age", 0) or 0),
+            "gotram": booking.get("gotram", ""),
             "temple_name": booking.get("location", booking.get("temple", "")),
             "room_type": booking.get("room_type_name", booking.get("room_type", "")),
             "check_in": booking.get("check_in", ""),
             "check_out": booking.get("check_out", ""),
             "no_of_rooms": int(booking.get("num_rooms", 1)),
+            "total_price": int(booking.get("total_price", 0) or 0),
             "reservation_status": "CONFIRMED",
             "reservation_mode": "Voice Assistant",
+            "payment_status": booking.get("payment_status", "pending"),
+            "payment_link": booking.get("payment_link", ""),
+            "donation_link": booking.get("donation_link", ""),
             "created_at": datetime.now().isoformat(),
         }
 

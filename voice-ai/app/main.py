@@ -29,6 +29,12 @@ from app.escalation import (
 from app.analytics import compute_analytics, compute_location_analytics, compute_source_analytics
 from app.search import search_transcripts, global_search
 from app.recorder import get_recording_path, get_recording, get_all_recordings
+from app.gotram import get_all_gotrams, add_gotram, is_allowed, match_gotram, get_gotram_count
+from app.payments import (
+    create_room_payment_link, create_donation_link, get_seva_options,
+    get_all_payments, get_payment, mark_paid, get_payment_stats,
+)
+from app.whatsapp import compose_donation_only_message, send_whatsapp, get_sent_log
 from app.pages.call_page import CALL_PAGE_HTML
 from app.pages.dashboard_page import DASHBOARD_HTML
 
@@ -252,6 +258,108 @@ async def dashboard():
     return DASHBOARD_HTML
 
 
+# === GOTRAM MANAGEMENT ===
+
+@app.get("/api/gotrams")
+async def api_gotrams():
+    """List all approved gotrams."""
+    return JSONResponse(content={"gotrams": get_all_gotrams(), "count": get_gotram_count()})
+
+
+@app.post("/api/gotrams")
+async def api_add_gotram(request: Request):
+    """Add a gotram to the approved list."""
+    body = await request.json()
+    name = body.get("name", "")
+    success = add_gotram(name)
+    return JSONResponse(content={"success": success, "count": get_gotram_count()})
+
+
+@app.get("/api/gotrams/check")
+async def api_check_gotram(gotram: str = ""):
+    """Check if a gotram is approved. Returns matched canonical name."""
+    matched = match_gotram(gotram)
+    return JSONResponse(content={
+        "input": gotram,
+        "allowed": matched is not None,
+        "matched": matched,
+    })
+
+
+# === PAYMENTS ===
+
+@app.get("/api/payments")
+async def api_payments():
+    """List all payment links + stats."""
+    return JSONResponse(content={
+        "payments": get_all_payments(),
+        "stats": get_payment_stats(),
+    })
+
+
+@app.post("/api/payments/room")
+async def api_create_room_payment(request: Request):
+    """Create a room payment link (fixed amount)."""
+    body = await request.json()
+    result = create_room_payment_link(
+        booking_id=body.get("booking_id", ""),
+        amount_inr=int(body.get("amount", 0)),
+        customer_name=body.get("customer_name", ""),
+        customer_phone=body.get("customer_phone", ""),
+    )
+    return JSONResponse(content=result)
+
+
+@app.post("/api/payments/{payment_id}/paid")
+async def api_mark_paid(payment_id: str):
+    """Mark a payment as completed (webhook or manual)."""
+    success = mark_paid(payment_id)
+    return JSONResponse(content={"success": success})
+
+
+# === DONATIONS ===
+
+@app.get("/api/donations/sevas")
+async def api_sevas():
+    """List available seva donation plans."""
+    return JSONResponse(content={"sevas": get_seva_options()})
+
+
+@app.post("/api/donations")
+async def api_create_donation(request: Request):
+    """
+    Create a donation link.
+    Body: {customer_name, customer_phone, amount (0=flexible), seva_id (optional)}
+    """
+    body = await request.json()
+    result = create_donation_link(
+        customer_name=body.get("customer_name", "Devotee"),
+        customer_phone=body.get("customer_phone", ""),
+        amount_inr=int(body.get("amount", 0)),
+        seva_id=body.get("seva_id", ""),
+    )
+    # Optionally send via WhatsApp
+    if body.get("send_whatsapp") and body.get("customer_phone"):
+        msg = compose_donation_only_message(body.get("customer_name", "Devotee"), result["link"])
+        send_whatsapp(body["customer_phone"], msg)
+        result["whatsapp_sent"] = True
+    return JSONResponse(content=result)
+
+
+# === WHATSAPP ===
+
+@app.get("/api/whatsapp/log")
+async def api_whatsapp_log():
+    """Get log of sent WhatsApp messages."""
+    return JSONResponse(content={"messages": get_sent_log()})
+
+
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "karivena-kaveri-ai", "version": "2.0"}
+    return {
+        "status": "ok",
+        "service": "karivena-kaveri-ai",
+        "version": "3.0",
+        "gotrams": get_gotram_count(),
+        "payment_mode": get_payment_stats().get("mode"),
+    }

@@ -53,7 +53,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     <div class="sc"><div class="n" id="nContacts">0</div><div class="l">Contacts</div></div>
     <div class="sc"><div class="n" id="nCampaigns">0</div><div class="l">Campaigns</div></div>
     <div class="sc"><div class="n" id="nEscalations">0</div><div class="l">Escalations</div></div>
-    <div class="sc"><div class="n" id="nConversion">0%</div><div class="l">Conversion</div></div>
+    <div class="sc"><div class="n" id="nRevenue">0</div><div class="l">Room Revenue</div></div>
+    <div class="sc"><div class="n" id="nDonations">0</div><div class="l">Donations</div></div>
 </div>
 
 <div class="search-bar">
@@ -66,6 +67,9 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     <div class="tab" onclick="showTab('bookings')">Bookings</div>
     <div class="tab" onclick="showTab('contacts')">Contacts</div>
     <div class="tab" onclick="showTab('campaigns')">Campaigns</div>
+    <div class="tab" onclick="showTab('payments')">Payments</div>
+    <div class="tab" onclick="showTab('donations')">Donations</div>
+    <div class="tab" onclick="showTab('gotrams')">Gotrams</div>
     <div class="tab" onclick="showTab('analytics')">Analytics</div>
     <div class="tab" onclick="showTab('escalations')">Escalations</div>
     <div class="tab" onclick="showTab('search')">Search Results</div>
@@ -79,8 +83,25 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
 <!-- BOOKINGS -->
 <div class="panel" id="p-bookings">
-<table><thead><tr><th>ID</th><th>Name</th><th>Phone</th><th>Location</th><th>Room</th><th>In</th><th>Out</th><th>Rooms</th><th>Total</th><th>Status</th></tr></thead>
-<tbody id="tb-bookings"><tr><td colspan="10" class="empty">No bookings.</td></tr></tbody></table>
+<table><thead><tr><th>ID</th><th>Name</th><th>Gotram</th><th>Phone</th><th>Location</th><th>Room</th><th>In</th><th>Out</th><th>Rooms</th><th>Total</th><th>Payment</th><th>Status</th></tr></thead>
+<tbody id="tb-bookings"><tr><td colspan="12" class="empty">No bookings.</td></tr></tbody></table>
+</div>
+
+<div class="panel" id="p-payments">
+<table><thead><tr><th>Payment ID</th><th>Type</th><th>Customer</th><th>Amount</th><th>Status</th><th>Link</th></tr></thead>
+<tbody id="tb-payments"><tr><td colspan="6" class="empty">No payments yet.</td></tr></tbody></table>
+</div>
+
+<div class="panel" id="p-donations">
+<div style="margin-bottom:.8rem"><button class="btn" onclick="showDonationPrompt()">+ Create Donation Link</button></div>
+<div id="seva-list" style="margin-bottom:1rem"></div>
+<table><thead><tr><th>Donation ID</th><th>Customer</th><th>Seva</th><th>Amount</th><th>Status</th><th>Link</th></tr></thead>
+<tbody id="tb-donations"><tr><td colspan="6" class="empty">No donations yet.</td></tr></tbody></table>
+</div>
+
+<div class="panel" id="p-gotrams">
+<div style="margin-bottom:.8rem"><button class="btn" onclick="showGotramPrompt()">+ Add Gotram</button> <span id="gotram-count" style="color:#71767b;font-size:.8rem"></span></div>
+<div id="gotram-list" style="display:flex;flex-wrap:wrap;gap:.4rem"></div>
 </div>
 
 <!-- CONTACTS -->
@@ -120,6 +141,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 function showTab(t){document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));document.querySelector('.tab[onclick*="'+t+'"]').classList.add('active');document.getElementById('p-'+t).classList.add('active')}
 function playRec(id){document.getElementById('aud').src='/api/recordings/'+id;document.getElementById('plbl').textContent='Playing: '+id;document.getElementById('player').classList.add('on');document.getElementById('aud').play()}
 function setWF(id,st){fetch('/api/calls/'+id+'/workflow',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:st})}).then(()=>refresh())}
+function showDonationPrompt(){const name=prompt('Donor name:');if(!name)return;const phone=prompt('Phone number:');const amount=prompt('Amount (leave blank for flexible/any amount):');fetch('/api/donations',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({customer_name:name,customer_phone:phone,amount:amount?parseInt(amount):0,send_whatsapp:!!phone})}).then(r=>r.json()).then(d=>{alert('Donation link created: '+d.link);refresh()})}
+function showGotramPrompt(){const name=prompt('Gotram name to add:');if(!name)return;fetch('/api/gotrams',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})}).then(()=>refresh())}
 function resolveEsc(id){fetch('/api/escalations/'+id+'/resolve',{method:'POST'}).then(()=>refresh())}
 function setCampStatus(id,st){fetch('/api/campaigns/'+id+'/status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:st})}).then(()=>refresh())}
 
@@ -168,7 +191,11 @@ async function refresh(){
         document.getElementById('nContacts').textContent=contacts.length;
         document.getElementById('nCampaigns').textContent=campaigns.length;
         document.getElementById('nEscalations').textContent=escData.stats?escData.stats.pending:0;
-        document.getElementById('nConversion').textContent=(analytics.summary?analytics.summary.conversion_rate_percent:0)+'%';
+        try{
+            const pStats=(await (await fetch('/api/payments')).json()).stats||{};
+            document.getElementById('nRevenue').textContent='₹'+(pStats.room_revenue||0).toLocaleString('en-IN');
+            document.getElementById('nDonations').textContent='₹'+(pStats.donation_total||0).toLocaleString('en-IN');
+        }catch(e){}
 
         // Calls
         const ct=document.getElementById('tb-calls');
@@ -182,8 +209,35 @@ async function refresh(){
 
         // Bookings
         const bt=document.getElementById('tb-bookings');
-        if(!bookings.length){bt.innerHTML='<tr><td colspan="10" class="empty">No bookings.</td></tr>'}
-        else{bt.innerHTML=bookings.map(b=>'<tr><td>'+b.booking_id+'</td><td>'+b.customer_name+'</td><td>'+b.customer_phone+'</td><td>'+b.location+'</td><td>'+b.room_type+'</td><td>'+b.check_in+'</td><td>'+b.check_out+'</td><td>'+b.num_rooms+'</td><td>INR '+(b.total_price||0).toLocaleString('en-IN')+'</td><td><span class="badge b-'+(b.status||'confirmed')+'">'+b.status+'</span></td></tr>').join('')}
+        if(!bookings.length){bt.innerHTML='<tr><td colspan="12" class="empty">No bookings.</td></tr>'}
+        else{bt.innerHTML=bookings.map(b=>{
+            const pay=b.payment_status||'pending';
+            return '<tr><td>'+b.booking_id+'</td><td>'+b.customer_name+'</td><td>'+(b.gotram||'—')+'</td><td>'+b.customer_phone+'</td><td>'+b.location+'</td><td>'+b.room_type+'</td><td>'+b.check_in+'</td><td>'+b.check_out+'</td><td>'+b.num_rooms+'</td><td>INR '+(b.total_price||0).toLocaleString('en-IN')+'</td><td><span class="badge b-'+(pay==='paid'?'completed':'pending')+'">'+pay+'</span></td><td><span class="badge b-'+(b.status||'confirmed')+'">'+b.status+'</span></td></tr>';
+        }).join('')}
+
+        // Payments
+        try{
+            const payData=await (await fetch('/api/payments')).json();
+            const payments=payData.payments||[];
+            const pt=document.getElementById('tb-payments');
+            if(!payments.length){pt.innerHTML='<tr><td colspan="6" class="empty">No payments yet.</td></tr>'}
+            else{pt.innerHTML=payments.filter(p=>p.type==='room_booking').map(p=>'<tr><td>'+p.payment_id+'</td><td>'+p.type+'</td><td>'+p.customer_name+'</td><td>INR '+(p.amount||0).toLocaleString('en-IN')+'</td><td><span class="badge b-'+(p.status==='paid'?'completed':'pending')+'">'+p.status+'</span></td><td><a href="'+p.link+'" target="_blank" style="color:#5b9bd5">Link</a></td></tr>').join('')}
+            // Donations
+            const dt=document.getElementById('tb-donations');
+            const donations=payments.filter(p=>p.type==='donation');
+            if(!donations.length){dt.innerHTML='<tr><td colspan="6" class="empty">No donations yet.</td></tr>'}
+            else{dt.innerHTML=donations.map(p=>'<tr><td>'+p.payment_id+'</td><td>'+p.customer_name+'</td><td>'+(p.seva_name||(p.flexible?'Flexible':'General'))+'</td><td>'+(p.amount>0?'INR '+p.amount.toLocaleString('en-IN'):'Any')+'</td><td><span class="badge b-'+(p.status==='paid'?'completed':'pending')+'">'+p.status+'</span></td><td><a href="'+p.link+'" target="_blank" style="color:#5b9bd5">Link</a></td></tr>').join('')}
+        }catch(e){}
+
+        // Gotrams
+        try{
+            const gData=await (await fetch('/api/gotrams')).json();
+            document.getElementById('gotram-count').textContent=gData.count+' approved gotrams';
+            document.getElementById('gotram-list').innerHTML=(gData.gotrams||[]).map(g=>'<span class="badge b-confirmed" style="padding:.3rem .6rem">'+g+'</span>').join('');
+            // Seva options
+            const sData=await (await fetch('/api/donations/sevas')).json();
+            document.getElementById('seva-list').innerHTML='<div style="color:#71767b;font-size:.7rem;margin-bottom:.4rem">SEVA PLANS</div>'+(sData.sevas||[]).map(s=>'<span class="badge b-scheduled" style="padding:.3rem .6rem;margin-right:.4rem">'+s.name+' — INR '+s.amount+'</span>').join('');
+        }catch(e){}
 
         // Contacts
         const cot=document.getElementById('tb-contacts');

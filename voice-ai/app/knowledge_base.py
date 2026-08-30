@@ -170,8 +170,53 @@ def create_booking(
     num_rooms: int = 1,
     num_guests: int = 1,
     customer_age: str = "",
+    gotram: str = "",
+    send_whatsapp: bool = True,
 ) -> dict:
-    """Create a new booking."""
+    """
+    Create a new booking.
+
+    MANDATORY fields (all required):
+      - customer_name
+      - location (city/temple)
+      - room_type
+      - check_in + check_out (stay span)
+      - gotram (community eligibility — MUST be in allowed list)
+
+    On success: generates Razorpay payment link + donation link,
+    and sends a WhatsApp confirmation message.
+    """
+    # === MANDATORY FIELD VALIDATION ===
+    missing = []
+    if not customer_name or not customer_name.strip():
+        missing.append("name")
+    if not location or not location.strip():
+        missing.append("location (city)")
+    if not room_type or not room_type.strip():
+        missing.append("room type")
+    if not gotram or not gotram.strip():
+        missing.append("gotram")
+    if missing:
+        return {
+            "success": False,
+            "error": f"Missing mandatory details: {', '.join(missing)}.",
+            "missing_fields": missing,
+        }
+
+    # === GOTRAM ELIGIBILITY CHECK ===
+    from app.gotram import match_gotram
+    matched_gotram = match_gotram(gotram)
+    if not matched_gotram:
+        return {
+            "success": False,
+            "error": (
+                f"The gotram '{gotram}' is not in our approved community list. "
+                "Karivena Satram accommodation is reserved for our specific community. "
+                "Please verify your gotram or contact the office."
+            ),
+            "gotram_rejected": True,
+        }
+
     if not check_in:
         check_in = date.today()
     if not check_out:
@@ -192,6 +237,7 @@ def create_booking(
         "customer_name": customer_name,
         "customer_phone": customer_phone,
         "customer_age": customer_age,
+        "gotram": matched_gotram,
         "location": loc.get("name", location),
         "room_type": "AC" if "non" not in rt else "Non-AC",
         "check_in": check_in.isoformat(),
@@ -204,9 +250,38 @@ def create_booking(
         "currency": "INR",
         "status": "confirmed",
         "workflow_status": "pending",
+        "payment_status": "pending",
         "source": "voice_ai",
         "created_at": date.today().isoformat(),
     }
+
+    # === GENERATE PAYMENT + DONATION LINKS ===
+    payment_link = ""
+    donation_link = ""
+    try:
+        from app.payments import create_room_payment_link, create_donation_link
+        pay = create_room_payment_link(
+            booking_id=booking_id,
+            amount_inr=int(avail["total_price"]),
+            customer_name=customer_name,
+            customer_phone=customer_phone,
+        )
+        payment_link = pay.get("link", "")
+        booking["payment_id"] = pay.get("payment_id")
+
+        # Flexible donation link (any amount, seva options offered in message)
+        don = create_donation_link(
+            customer_name=customer_name,
+            customer_phone=customer_phone,
+            amount_inr=0,  # flexible
+        )
+        donation_link = don.get("link", "")
+        booking["donation_id"] = don.get("payment_id")
+    except Exception as e:
+        logger.error(f"Payment link generation failed: {e}")
+
+    booking["payment_link"] = payment_link
+    booking["donation_link"] = donation_link
 
     # Store
     _bookings[booking_id] = booking
@@ -228,10 +303,24 @@ def create_booking(
     except Exception:
         pass
 
+    # === SEND WHATSAPP CONFIRMATION ===
+    whatsapp_sent = False
+    if send_whatsapp and customer_phone:
+        try:
+            from app.whatsapp import compose_booking_message, send_whatsapp as wa_send
+            msg = compose_booking_message(booking, payment_link, donation_link)
+            result = wa_send(customer_phone, msg)
+            whatsapp_sent = result.get("success", False)
+        except Exception as e:
+            logger.error(f"WhatsApp send failed: {e}")
+
     return {
         "success": True,
         "booking_id": booking_id,
         "confirmation": f"Booking confirmed. ID: {booking_id}",
+        "payment_link": payment_link,
+        "donation_link": donation_link,
+        "whatsapp_sent": whatsapp_sent,
         "details": booking,
     }
 

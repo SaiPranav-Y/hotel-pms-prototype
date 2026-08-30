@@ -1,0 +1,25 @@
+{
+  "_comment": "Replace this list with your finalized approved gotrams. Add one entry per allowed gotram. The system matches case/space/suffix-insensitively.",
+  "gotrams": [
+    "Bharadwaja",
+    "Kashyapa",
+    "Vasishta",
+    "Vishwamitra",
+    "Gautama",
+    "Atri",
+    "Bhrigu",
+    "Angirasa",
+    "Agastya",
+    "Kaundinya",
+    "Shandilya",
+    "Srivatsa",
+    "Harita",
+    "Garga",
+    "Kutsa",
+    "Jamadagni",
+    "Kaushika",
+    "Mudgala",
+    "Sankhyayana",
+    "Parashara"
+  ]
+}
