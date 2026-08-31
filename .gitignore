@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+env/
+.Python
+build/
+dist/
+*.egg-info/
+
+# Secrets / credentials — NEVER commit these
+.env
+firebase-key.json
+*.pem
+*.key
+
+# Generated artifacts (invoices, 80G certificates)
+app/generated/*
+!app/generated/.gitkeep
+
+# Call recordings (runtime artifacts)
+recordings/
+
+# Large binaries / data (provide separately)
+*.exe
+*.xlsx
+
+# OS
+.DS_Store
+Thumbs.db
