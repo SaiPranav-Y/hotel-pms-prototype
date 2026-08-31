@@ -38,6 +38,7 @@ from app.whatsapp import compose_donation_only_message, send_whatsapp, get_sent_
 from app.payments import (
     create_room_plus_donation_link, create_seva_donation_link,
     set_seva_amount, get_80g_donations,
+    verify_webhook_signature, handle_payment_confirmed, parse_webhook_event,
 )
 from app import roles as roles_mod
 from app import rates as rates_mod
@@ -321,9 +322,46 @@ async def api_create_room_payment(request: Request):
 
 @app.post("/api/payments/{payment_id}/paid")
 async def api_mark_paid(payment_id: str):
-    """Mark a payment as completed (webhook or manual)."""
-    success = mark_paid(payment_id)
-    return JSONResponse(content={"success": success})
+    """
+    Mark a payment as completed (manual). Fires the automation loop:
+    marks paid + auto-generates 80G certificate + WhatsApp push for donations.
+    """
+    result = handle_payment_confirmed(payment_id=payment_id)
+    return JSONResponse(content=result)
+
+
+@app.post("/api/payments/webhook")
+async def api_payment_webhook(request: Request):
+    """
+    Razorpay webhook receiver. Verifies the signature, then fires the
+    automation loop on payment_link.paid / payment.captured events:
+    marks the payment paid and auto-issues the 80G certificate to WhatsApp.
+
+    Configure in Razorpay dashboard -> Settings -> Webhooks:
+      URL:    https://<your-host>/api/payments/webhook
+      Secret: same value as RAZORPAY_WEBHOOK_SECRET in .env
+      Events: payment_link.paid, payment.captured
+    """
+    raw = await request.body()
+    signature = request.headers.get("X-Razorpay-Signature", "")
+    if not verify_webhook_signature(raw, signature):
+        return JSONResponse(status_code=401, content={"error": "Invalid signature"})
+
+    import json as _json
+    try:
+        payload = _json.loads(raw.decode("utf-8"))
+    except Exception:
+        return JSONResponse(status_code=400, content={"error": "Invalid JSON"})
+
+    parsed = parse_webhook_event(payload)
+    # Only act on success events
+    if parsed["event"] in ("payment_link.paid", "payment.captured", "order.paid"):
+        result = handle_payment_confirmed(
+            reference_id=parsed["reference_id"],
+            payment_id=parsed["reference_id"],
+        )
+        return JSONResponse(content={"handled": True, "event": parsed["event"], "result": result})
+    return JSONResponse(content={"handled": False, "event": parsed["event"]})
 
 
 # === DONATIONS ===

@@ -22,6 +22,8 @@ logger = logging.getLogger(__name__)
 
 RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID", "")
 RAZORPAY_KEY_SECRET = os.getenv("RAZORPAY_KEY_SECRET", "")
+# Webhook secret configured in the Razorpay dashboard (Settings -> Webhooks).
+RAZORPAY_WEBHOOK_SECRET = os.getenv("RAZORPAY_WEBHOOK_SECRET", "")
 
 _client = None
 _mock_mode = True
@@ -373,6 +375,129 @@ def get_80g_donations() -> list[dict]:
     """All paid, 80G-eligible donations (for certificate generation)."""
     return [p for p in _payment_links.values()
             if p.get("is_80g") and p.get("status") == "paid"]
+
+
+def find_payment_by_reference(reference_id: str) -> dict | None:
+    """
+    Look up a payment by its Razorpay reference_id (which equals our payment_id
+    for room links, and the DON-/PAY- ref we set). Falls back to a scan.
+    """
+    if not reference_id:
+        return None
+    if reference_id in _payment_links:
+        return _payment_links[reference_id]
+    for p in _payment_links.values():
+        if p.get("payment_id") == reference_id:
+            return p
+    return None
+
+
+# === WEBHOOK + AUTOMATION ===
+
+def verify_webhook_signature(raw_body: bytes, signature: str) -> bool:
+    """
+    Verify a Razorpay webhook signature (HMAC-SHA256 of the raw body using the
+    webhook secret). In MOCK mode (no secret configured) verification is skipped
+    so local/demo testing still works.
+    """
+    if not RAZORPAY_WEBHOOK_SECRET:
+        logger.info("[Webhook] No RAZORPAY_WEBHOOK_SECRET set — skipping signature check (mock)")
+        return True
+    if not signature:
+        return False
+    import hmac
+    import hashlib
+    expected = hmac.new(
+        RAZORPAY_WEBHOOK_SECRET.encode("utf-8"),
+        raw_body,
+        hashlib.sha256,
+    ).hexdigest()
+    return hmac.compare_digest(expected, signature)
+
+
+def handle_payment_confirmed(reference_id: str = "", payment_id: str = "") -> dict:
+    """
+    THE AUTOMATION LOOP. Called when a payment is confirmed (via webhook or
+    manual mark). Steps:
+      1. Mark the payment paid.
+      2. If it's an 80G donation, auto-generate the 80G certificate PDF and
+         push it to the donor's WhatsApp.
+      3. Return a summary of what fired.
+
+    This closes the "make sure this is automated" requirement: a confirmed
+    donation payment now issues its 80G certificate with no manual step.
+    """
+    ref = payment_id or reference_id
+    record = find_payment_by_reference(ref)
+    if not record:
+        return {"success": False, "error": f"No payment found for '{ref}'"}
+
+    pid = record["payment_id"]
+    already_paid = record.get("status") == "paid"
+    mark_paid(pid)
+
+    result = {
+        "success": True,
+        "payment_id": pid,
+        "type": record.get("type"),
+        "was_already_paid": already_paid,
+        "certificate_80g": None,
+        "whatsapp": None,
+    }
+
+    # Auto-issue 80G certificate for donations
+    if record.get("is_80g") and not record.get("certificate_80g_issued"):
+        try:
+            from app import certificate_80g
+            cert = certificate_80g.generate_80g_certificate(record)
+            mark_80g_issued(pid)
+            result["certificate_80g"] = {
+                "certificate_no": cert["certificate_no"],
+                "file": cert["file_path"],
+            }
+            # Push to WhatsApp
+            phone = record.get("customer_phone", "")
+            if phone:
+                try:
+                    from app import whatsapp
+                    caption = whatsapp.compose_document_message(
+                        record.get("customer_name", "Donor"), "80g", cert["certificate_no"]
+                    )
+                    wa = whatsapp.send_whatsapp_document(phone, cert["file_path"], caption)
+                    result["whatsapp"] = wa.get("provider")
+                except Exception as e:
+                    logger.error(f"[Automation] 80G WhatsApp push failed: {e}")
+        except Exception as e:
+            logger.error(f"[Automation] 80G certificate generation failed: {e}")
+            result["certificate_error"] = str(e)
+
+    logger.info(f"[Automation] Payment confirmed {pid} — cert={bool(result['certificate_80g'])}")
+    return result
+
+
+def parse_webhook_event(payload: dict) -> dict:
+    """
+    Extract the reference_id + razorpay payment id from a Razorpay webhook
+    payload. Handles both payment_link.paid and payment.captured events.
+    """
+    event = payload.get("event", "")
+    reference_id = ""
+    rp_payment_id = ""
+    try:
+        entities = payload.get("payload", {})
+        # payment_link.paid
+        pl = entities.get("payment_link", {}).get("entity", {})
+        if pl:
+            reference_id = pl.get("reference_id", "")
+        # payment.captured
+        pay = entities.get("payment", {}).get("entity", {})
+        if pay:
+            rp_payment_id = pay.get("id", "")
+            notes = pay.get("notes", {}) or {}
+            reference_id = reference_id or notes.get("booking_id", "") or notes.get("reference_id", "")
+    except Exception:
+        pass
+    return {"event": event, "reference_id": reference_id, "razorpay_payment_id": rp_payment_id}
 
 
 # === HELPERS ===

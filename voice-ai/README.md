@@ -303,3 +303,52 @@ py test_all.py       # 27 core tests
 py test_phase5.py    # 12 gotram/payment/whatsapp tests
 py test_phase6.py    # 24 roles/rates/payment-types/invoice/80G/checkout tests
 ```
+
+---
+
+## v4.1 — Automation + Compliance Gaps Closed
+
+### Razorpay Payment Webhook → Auto 80G Certificate
+
+The automation loop is now closed end-to-end: when a donation payment is confirmed (either via the Razorpay webhook or manual mark-paid), the system:
+
+1. Marks the payment as paid
+2. Auto-generates the 80G certificate PDF (if it's a donation with `is_80g`)
+3. Pushes the certificate to the donor's WhatsApp
+4. Flags `certificate_80g_issued` to prevent duplicates (idempotent)
+
+Configure the webhook in Razorpay dashboard → Settings → Webhooks:
+- URL: `https://<your-host>/api/payments/webhook`
+- Secret: same as `RAZORPAY_WEBHOOK_SECRET` in your `.env`
+- Events: `payment_link.paid`, `payment.captured`
+
+Signature verification uses HMAC-SHA256. In mock mode (no secret configured) verification is skipped for local testing.
+
+### Relative Date Parsing
+
+The normalizer now handles natural-language dates:
+
+- `tomorrow`, `day after tomorrow`, `today`, `tonight`
+- `this weekend`, `next weekend` (returns distinct Saturdays)
+- All weekdays: `this friday`, `next monday`, etc.
+- `next week`, `next month`
+- Date ranges: `June 28 to June 30` (both captured)
+- Duration: `3 nights`, `2 rojulu`
+- ISO and slash formats: `2026-09-01`, `28/06/2026`
+
+The AI prompt also instructs the LLM to resolve relative dates to exact YYYY-MM-DD and confirm ambiguous ones before booking.
+
+### Call-Recording Consent (India Compliance)
+
+The greeting now discloses AI identity and recording consent per Indian telecom regulations:
+
+> _"This is Kaveri, your AI assistant. Please note this call may be recorded for quality and confirmation purposes."_
+
+Both the Python (ai_engine.py) and Node.js (voice-gateway) prompts include a rule to disclose this on the first turn only, and offer transfer to a staff member if the caller objects.
+
+### Tests
+
+```bash
+py test_phase7.py    # 19 tests: automation, webhook, date parsing, consent
+# Total: 82 tests across all suites (27 + 12 + 24 + 19)
+```

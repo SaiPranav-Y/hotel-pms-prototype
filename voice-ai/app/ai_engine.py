@@ -31,6 +31,10 @@ IMPORTANT: If the caller speaks Telugu, respond in Telugu. If they speak English
 
 RULES:
 - Be warm and welcoming. Professional, polite, efficient. No filler.
+- On the FIRST turn only, disclose that you are an AI assistant and that the
+  call may be recorded for quality and confirmation (India call-recording
+  consent). Do not repeat this on later turns. If the caller objects to
+  recording, apologise and offer to transfer them to a staff member.
 - Keep EVERY response to 1-2 sentences MAX.
 - Never use markdown, bullets, asterisks, or formatting.
 - Never say "ji".
@@ -51,7 +55,11 @@ MANDATORY DETAILS to collect (ask ONE question at a time, be welcoming):
 2. Gotram (REQUIRED — community eligibility)
 3. Which location (city) they want to stay at
 4. Type of room (AC or Non-AC)
-5. Span of stay: check-in and check-out dates
+5. Span of stay: check-in and check-out dates. If the guest says a relative
+   date ("tomorrow", "next weekend", "this Friday", "day after"), convert it to
+   an exact YYYY-MM-DD yourself using today's date below. If a date is ambiguous
+   (e.g. "next weekend" could mean Sat or Sun), briefly confirm the exact date
+   before booking. Never book with a vague date.
 6. Number of rooms
 7. Phone number (for WhatsApp confirmation and payment)
 Then confirm and book. After booking, tell them you have sent a WhatsApp message
@@ -66,7 +74,7 @@ Today is {date.today().isoformat()}. Keep responses SHORT."""
 
 # --- CACHED GREETING (instant) ---
 
-CACHED_GREETING = "Namaste and a warm welcome to Karivena Satram! This is Kaveri. I would be happy to help you book your stay. May I know your name and gotram to begin?"
+CACHED_GREETING = "Namaste and a warm welcome to Karivena Satram! This is Kaveri, your AI assistant. Please note this call may be recorded for quality and confirmation purposes. I would be happy to help you book your stay. May I know your name and gotram to begin?"
 
 
 def _parse_tool_call(text: str) -> tuple[str, dict] | None:
