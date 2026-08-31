@@ -1,25 +1,21 @@
-# Secrets
-firebase-key.json
-.env
-
 # Python
 __pycache__/
 *.pyc
 *.pyo
 .venv/
 venv/
+env/
 
-# Build artifacts
-dist/
-build/
-*.spec
-*.exe
+# Secrets / credentials
+.env
+firebase-key.json
 
-# Recordings (large binary files)
-recordings/*.webm
-recordings/*.mp3
-recordings/*.wav
+# Generated artifacts (invoices, 80G certificates)
+app/generated/
 
-# IDE
-.vscode/
-.idea/
+# OS
+.DS_Store
+Thumbs.db
+
+# Call recordings (demo/runtime artifacts)
+recordings/

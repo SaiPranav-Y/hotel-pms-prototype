@@ -140,8 +140,22 @@ def check_availability(
         current += timedelta(days=1)
 
     num_nights = (check_out - check_in).days
+
+    # Prefer admin-configured rates (rates.py: location x room_type x season).
+    # Fall back to the Excel-derived price when no rate is configured.
+    total_price = 0
     price_per_night = prices[0] if prices else 0
-    total_price = price_per_night * num_nights * num_rooms
+    try:
+        from app import rates as _rates
+        rate_result = _rates.compute_total(loc["name"], type_name, check_in, check_out, num_rooms)
+        if rate_result.get("total", 0) > 0:
+            total_price = rate_result["total"]
+            price_per_night = _rates.get_rate(loc["name"], type_name, check_in)
+    except Exception:
+        pass
+
+    if total_price == 0:
+        total_price = price_per_night * num_nights * num_rooms
 
     return {
         "available": min_available >= num_rooms,

@@ -35,6 +35,15 @@ from app.payments import (
     get_all_payments, get_payment, mark_paid, get_payment_stats,
 )
 from app.whatsapp import compose_donation_only_message, send_whatsapp, get_sent_log
+from app.payments import (
+    create_room_plus_donation_link, create_seva_donation_link,
+    set_seva_amount, get_80g_donations,
+)
+from app import roles as roles_mod
+from app import rates as rates_mod
+from app import checkout as checkout_mod
+from app import invoice as invoice_mod
+from app import certificate_80g as cert_mod
 from app.pages.call_page import CALL_PAGE_HTML
 from app.pages.dashboard_page import DASHBOARD_HTML
 
@@ -359,7 +368,270 @@ async def health():
     return {
         "status": "ok",
         "service": "karivena-kaveri-ai",
-        "version": "3.0",
+        "version": "4.0",
         "gotrams": get_gotram_count(),
         "payment_mode": get_payment_stats().get("mode"),
+        "roles": roles_mod.ROLES,
+        "rate_locations": len(rates_mod.get_all_rates()),
     }
+
+
+# === RBAC HELPER ===
+
+def _caller(request: Request) -> str:
+    """
+    Resolve the acting user's email from the X-User-Email header.
+    (Firebase Auth token verification wires in here later when creds provided.)
+    """
+    return request.headers.get("X-User-Email", "").strip().lower()
+
+
+def _guard(request: Request, permission: str):
+    """
+    Return None if allowed, else a JSONResponse(403/401).
+    Usage: denied = _guard(request, "edit_rates"); if denied: return denied
+    """
+    email = _caller(request)
+    allowed, reason = roles_mod.check_access(email, permission)
+    if allowed:
+        return None
+    status = 401 if reason in ("No user identity provided", "User not found") else 403
+    return JSONResponse(status_code=status, content={"error": reason, "permission": permission})
+
+
+# === ROLES & USERS ===
+
+@app.get("/api/roles")
+async def api_roles():
+    """List roles and their permission sets."""
+    return JSONResponse(content={"roles": roles_mod.get_all_roles()})
+
+
+@app.get("/api/users")
+async def api_users(request: Request):
+    """List staff users (super_admin only)."""
+    denied = _guard(request, "manage_users")
+    if denied:
+        return denied
+    return JSONResponse(content={"users": roles_mod.get_all_users()})
+
+
+@app.post("/api/users")
+async def api_create_user(request: Request):
+    """Create a staff user (super_admin only)."""
+    denied = _guard(request, "manage_users")
+    if denied:
+        return denied
+    body = await request.json()
+    result = roles_mod.create_user(
+        email=body.get("email", ""),
+        name=body.get("name", ""),
+        role=body.get("role", "supervisor"),
+        created_by=_caller(request) or "system",
+    )
+    code = 200 if result.get("success") else 400
+    return JSONResponse(status_code=code, content=result)
+
+
+@app.post("/api/users/{email}/role")
+async def api_assign_role(email: str, request: Request):
+    """Change a user's role (super_admin only)."""
+    denied = _guard(request, "assign_roles")
+    if denied:
+        return denied
+    body = await request.json()
+    result = roles_mod.assign_role(email, body.get("role", ""))
+    code = 200 if result.get("success") else 400
+    return JSONResponse(status_code=code, content=result)
+
+
+# === RATES (admin editable) ===
+
+@app.get("/api/rates")
+async def api_rates():
+    """Full rate table (viewable by any authenticated staff)."""
+    return JSONResponse(content={"rates": rates_mod.get_all_rates()})
+
+
+@app.get("/api/rates/quote")
+async def api_rate_quote(location: str = "", room_type: str = "AC",
+                         check_in: str = "", check_out: str = "", rooms: int = 1):
+    """Compute a price quote for a stay."""
+    from datetime import date
+    try:
+        ci = date.fromisoformat(check_in)
+        co = date.fromisoformat(check_out)
+    except Exception:
+        return JSONResponse(status_code=400, content={"error": "check_in/check_out must be YYYY-MM-DD"})
+    quote = rates_mod.compute_total(location, room_type, ci, co, rooms)
+    return JSONResponse(content=quote)
+
+
+@app.post("/api/rates")
+async def api_set_rate(request: Request):
+    """Set a base rate (admin only)."""
+    denied = _guard(request, "edit_rates")
+    if denied:
+        return denied
+    body = await request.json()
+    result = rates_mod.set_rate(
+        location=body.get("location", ""),
+        room_type=body.get("room_type", "AC"),
+        base_rate=int(body.get("base_rate", 0)),
+    )
+    return JSONResponse(content=result)
+
+
+@app.post("/api/rates/season")
+async def api_add_season_rate(request: Request):
+    """Add a seasonal rate override (admin only)."""
+    denied = _guard(request, "edit_rates")
+    if denied:
+        return denied
+    body = await request.json()
+    result = rates_mod.add_season_rate(
+        location=body.get("location", ""),
+        room_type=body.get("room_type", "AC"),
+        name=body.get("name", "Season"),
+        from_date=body.get("from", ""),
+        to_date=body.get("to", ""),
+        rate=int(body.get("rate", 0)),
+    )
+    return JSONResponse(content=result)
+
+
+# === SEVA AMOUNTS (admin editable) ===
+
+@app.post("/api/sevas")
+async def api_set_seva(request: Request):
+    """Set/update a seva amount (admin only)."""
+    denied = _guard(request, "set_seva_amounts")
+    if denied:
+        return denied
+    body = await request.json()
+    result = set_seva_amount(
+        seva_id=body.get("seva_id", ""),
+        amount=int(body.get("amount", 0)),
+        name=body.get("name", ""),
+        description=body.get("description", ""),
+    )
+    return JSONResponse(content=result)
+
+
+# === PAYMENTS: combined + seva types ===
+
+@app.post("/api/payments/room-donation")
+async def api_room_plus_donation(request: Request):
+    """Payment type 2: fixed room + customer-chosen donation (80G on donation)."""
+    body = await request.json()
+    result = create_room_plus_donation_link(
+        booking_id=body.get("booking_id", ""),
+        room_amount_inr=int(body.get("room_amount", 0)),
+        donation_amount_inr=int(body.get("donation_amount", 0)),
+        customer_name=body.get("customer_name", ""),
+        customer_phone=body.get("customer_phone", ""),
+    )
+    return JSONResponse(content=result)
+
+
+@app.post("/api/payments/seva")
+async def api_seva_donation(request: Request):
+    """Payment type 3: seva donation (predefined or custom amount, 80G)."""
+    body = await request.json()
+    result = create_seva_donation_link(
+        customer_name=body.get("customer_name", ""),
+        customer_phone=body.get("customer_phone", ""),
+        seva_id=body.get("seva_id", ""),
+        custom_amount_inr=int(body.get("custom_amount", 0)),
+    )
+    code = 200 if result.get("success", True) else 400
+    return JSONResponse(status_code=code, content=result)
+
+
+# === INVOICE (supervisor+) ===
+
+@app.post("/api/invoice")
+async def api_generate_invoice(request: Request):
+    """Generate an invoice PDF for a booking (supervisor+)."""
+    denied = _guard(request, "generate_invoice")
+    if denied:
+        return denied
+    body = await request.json()
+    result = invoice_mod.generate_invoice(body.get("booking", body))
+    return JSONResponse(content=result)
+
+
+@app.get("/api/invoice/{booking_id}/download")
+async def api_download_invoice(booking_id: str):
+    """Download a generated invoice PDF."""
+    from pathlib import Path
+    path = Path(invoice_mod._OUT_DIR) / f"invoice_{booking_id}.pdf"
+    if path.exists():
+        return FileResponse(path, media_type="application/pdf", filename=path.name)
+    return JSONResponse(status_code=404, content={"error": "Invoice not found"})
+
+
+# === 80G CERTIFICATE ===
+
+@app.get("/api/certificates/80g")
+async def api_list_80g():
+    """List paid donations eligible for 80G certificates."""
+    return JSONResponse(content={"donations": get_80g_donations()})
+
+
+@app.post("/api/certificates/80g")
+async def api_generate_80g(request: Request):
+    """Generate an 80G certificate PDF for a donation (supervisor+)."""
+    denied = _guard(request, "generate_invoice")
+    if denied:
+        return denied
+    body = await request.json()
+    result = cert_mod.generate_80g_certificate(body.get("donation", body))
+    return JSONResponse(content=result)
+
+
+@app.get("/api/certificates/80g/{payment_id}/download")
+async def api_download_80g(payment_id: str):
+    """Download a generated 80G certificate PDF."""
+    from pathlib import Path
+    path = Path(cert_mod._OUT_DIR) / f"80g_{payment_id}.pdf"
+    if path.exists():
+        return FileResponse(path, media_type="application/pdf", filename=path.name)
+    return JSONResponse(status_code=404, content={"error": "Certificate not found"})
+
+
+# === CHECKOUT (supervisor+, WhatsApp-driven) ===
+
+@app.post("/api/checkout")
+async def api_checkout(request: Request):
+    """
+    Trigger checkout for a booking (supervisor+).
+    Body: {booking: {...}, donation_payment_id?: "..."}
+    Runs: payment link + invoice + 80G (if donation) + WhatsApp push.
+    """
+    denied = _guard(request, "trigger_checkout")
+    if denied:
+        return denied
+    body = await request.json()
+    result = checkout_mod.process_checkout(
+        booking=body.get("booking", body),
+        donation_payment_id=body.get("donation_payment_id", ""),
+    )
+    return JSONResponse(content=result)
+
+
+@app.post("/api/checkout/run-due")
+async def api_run_due_checkouts(request: Request):
+    """Run all due checkouts (end-of-stay scheduler; supervisor+)."""
+    denied = _guard(request, "trigger_checkout")
+    if denied:
+        return denied
+    from datetime import date
+    body = {}
+    try:
+        body = await request.json()
+    except Exception:
+        pass
+    on_date = date.fromisoformat(body["date"]) if body.get("date") else None
+    result = checkout_mod.run_due_checkouts(on_date)
+    return JSONResponse(content=result)

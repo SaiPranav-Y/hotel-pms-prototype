@@ -45,7 +45,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 </head>
 <body>
 <a href="/" class="nav">Make a Call</a>
-<div class="hdr"><h1>Karivena Satram — AI Platform</h1><p>Kaveri Voice Assistant Dashboard v2.0</p></div>
+<div class="hdr"><h1>Karivena Satram — AI Platform</h1><p>Kaveri Voice Assistant Dashboard v4.0 · Roles · Rates · 80G · WhatsApp Checkout</p></div>
 
 <div class="stats">
     <div class="sc"><div class="n" id="nCalls">0</div><div class="l">Calls</div></div>

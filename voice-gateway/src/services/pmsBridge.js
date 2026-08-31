@@ -54,6 +54,7 @@ async function createReservation(bookingData, callerPhone) {
       customer_name: bookingData.guest_name || '',
       customer_phone: callerPhone || '',
       customer_age: 0,
+      gotram: bookingData.gotram || '',
       temple_name: bookingData.location || '',
       room_type: bookingData.room_type || 'AC',
       check_in: bookingData.check_in || '',
@@ -61,6 +62,7 @@ async function createReservation(bookingData, callerPhone) {
       no_of_rooms: bookingData.guests || 1,
       reservation_status: 'CONFIRMED',
       reservation_mode: 'Voice Assistant',
+      payment_status: 'pending',
       created_at: new Date().toISOString(),
     };
 
