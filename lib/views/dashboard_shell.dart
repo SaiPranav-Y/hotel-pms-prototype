@@ -4,6 +4,7 @@ import '../models/app_user.dart';
 import 'admin/rates_view.dart';
 import 'admin/staff_view.dart';
 import 'dashboard_view.dart';
+import 'donations_view.dart';
 import 'inventory_view.dart';
 import 'reservations_view.dart';
 
@@ -52,6 +53,14 @@ class _DashboardShellState extends State<DashboardShell> {
         icon: Icons.inventory_2_rounded,
         label: 'Inventory',
         builder: () => const InventoryView(),
+      ));
+    }
+    // Donations — visible to any staff who can view bookings/customers
+    if (u.can(Perm.viewBookings) || u.can(Perm.viewCustomers)) {
+      entries.add(_NavEntry(
+        icon: Icons.volunteer_activism_rounded,
+        label: 'Donations',
+        builder: () => const DonationsView(),
       ));
     }
     if (u.can(Perm.editRates) || u.can(Perm.setSevaAmounts)) {

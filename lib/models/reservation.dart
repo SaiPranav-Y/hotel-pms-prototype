@@ -4,11 +4,15 @@ class Reservation {
   final String customerName;
   final String customerPhone;
   final int customerAge;
+  final String gotram;
   final String templeName;
   final String roomType;
   final DateTime checkIn;
   final DateTime checkOut;
   final int noOfRooms;
+  final int totalPrice;
+  final String paymentMethod;
+  final String paymentStatus;
   final String reservationStatus;
   final String reservationMode;
   final DateTime createdAt;
@@ -18,11 +22,15 @@ class Reservation {
     required this.customerName,
     required this.customerPhone,
     required this.customerAge,
+    this.gotram = '',
     required this.templeName,
     required this.roomType,
     required this.checkIn,
     required this.checkOut,
     required this.noOfRooms,
+    this.totalPrice = 0,
+    this.paymentMethod = '',
+    this.paymentStatus = 'pending',
     required this.reservationStatus,
     required this.reservationMode,
     required this.createdAt,
@@ -38,11 +46,15 @@ class Reservation {
       customerName: map['customer_name'] as String,
       customerPhone: _parsePhone(map['customer_phone'] ?? map['phone_number']),
       customerAge: _parseInt(map['customer_age']),
+      gotram: (map['gotram'] as String?) ?? '',
       templeName: (map['temple_name'] as String?) ?? '',
       roomType: (map['room_type'] as String?) ?? '',
       checkIn: _parseDate(map['check_in'] ?? map['from_date']),
       checkOut: _parseDate(map['check_out'] ?? map['to_date']),
       noOfRooms: _parseRooms(map['no_of_rooms'], map['number_of_rooms']),
+      totalPrice: _parseInt(map['total_price']),
+      paymentMethod: (map['payment_method'] as String?) ?? '',
+      paymentStatus: (map['payment_status'] as String?) ?? 'pending',
       reservationStatus:
           (map['reservation_status'] as String?) ?? 'Waiting for Approval',
       reservationMode:
@@ -56,11 +68,15 @@ class Reservation {
       'customer_name': customerName,
       'customer_phone': customerPhone,
       'customer_age': customerAge,
+      'gotram': gotram,
       'temple_name': templeName,
       'room_type': roomType,
       'check_in': checkIn.toIso8601String(),
       'check_out': checkOut.toIso8601String(),
       'no_of_rooms': noOfRooms,
+      'total_price': totalPrice,
+      'payment_method': paymentMethod,
+      'payment_status': paymentStatus,
       'reservation_status': reservationStatus,
       'reservation_mode': reservationMode,
       'created_at': createdAt.toIso8601String(),
