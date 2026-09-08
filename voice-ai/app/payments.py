@@ -32,16 +32,79 @@ _mock_mode = True
 _payment_links: dict[str, dict] = {}
 
 
-# === SEVA OPTIONS (fixed-amount donation plans — ADMIN editable) ===
-# All seva/donation amounts are 80G tax-exempt eligible.
-SEVA_OPTIONS = [
-    {"id": "annadanam", "name": "Annadanam (Food Offering)", "amount": 1116, "description": "Sponsor a meal for pilgrims", "allow_custom": True},
-    {"id": "nitya_pooja", "name": "Nitya Pooja", "amount": 516, "description": "Daily worship offering", "allow_custom": True},
-    {"id": "deeparadhana", "name": "Deeparadhana", "amount": 251, "description": "Lamp offering", "allow_custom": True},
-    {"id": "special_seva", "name": "Special Seva", "amount": 2116, "description": "Special occasion seva", "allow_custom": True},
-    {"id": "gau_seva", "name": "Gau Seva", "amount": 1008, "description": "Cow protection service", "allow_custom": True},
-    {"id": "vidya_danam", "name": "Vidya Danam", "amount": 5001, "description": "Support Vedic education", "allow_custom": True},
+# === DONATION OPTIONS (Karivena Satram — ADMIN editable) ===
+# All donations are 80G tax-exempt eligible (certificate issued post-donation).
+# Three categories:
+#   1. General Donation      — any amount the donor chooses (allow_custom, amount 0)
+#   2. Corpus Fund Donations — fixed capital-fund contributions
+#   3. Corpus Fund Receipt   — sponsorship / seva receipts (fixed amounts)
+DONATION_CATEGORIES = [
+    {"id": "general", "name": "General Donation"},
+    {"id": "corpus_fund_donation", "name": "Corpus Fund Donations"},
+    {"id": "corpus_fund_receipt", "name": "Corpus Fund Receipt"},
 ]
+
+SEVA_OPTIONS = [
+    # 1. General Donation — donor decides the amount
+    {"id": "general", "name": "General Donation", "amount": 0,
+     "category": "general", "description": "Donate any amount of your choosing",
+     "allow_custom": True},
+
+    # 2. Corpus Fund Donations
+    {"id": "room_construction", "name": "Room Construction", "amount": 500000,
+     "category": "corpus_fund_donation", "description": "Sponsor construction of a room",
+     "allow_custom": True},
+    {"id": "bhudanam", "name": "Bhudanam (Land Donation)", "amount": 100000,
+     "category": "corpus_fund_donation", "description": "Contribution towards land",
+     "allow_custom": True},
+
+    # 3. Corpus Fund Receipt (sponsorships / sevas)
+    {"id": "one_day_annadanam", "name": "One Day Annadhanam", "amount": 2000,
+     "category": "corpus_fund_receipt", "description": "Sponsor one day of Annadanam",
+     "allow_custom": True},
+    {"id": "five_day_annadanam", "name": "Five Day Annadhanam", "amount": 15000,
+     "category": "corpus_fund_receipt", "description": "Sponsor five days of Annadanam",
+     "allow_custom": True},
+    {"id": "nityannadanam", "name": "Nityannadanam", "amount": 30000,
+     "category": "corpus_fund_receipt", "description": "Perpetual daily Annadanam",
+     "allow_custom": True},
+    {"id": "marriage_day", "name": "Marriage Day", "amount": 3000,
+     "category": "corpus_fund_receipt", "description": "Annadanam on your marriage day",
+     "allow_custom": True},
+    {"id": "birthday", "name": "Birthday", "amount": 2000,
+     "category": "corpus_fund_receipt", "description": "Annadanam on your birthday",
+     "allow_custom": True},
+    {"id": "special_occasion", "name": "Special Occasion", "amount": 6000,
+     "category": "corpus_fund_receipt", "description": "Annadanam for a special occasion",
+     "allow_custom": True},
+    {"id": "maharaja_poshakulu", "name": "Maharaja Poshakulu", "amount": 100000,
+     "category": "corpus_fund_receipt", "description": "Maharaja patron sponsorship",
+     "allow_custom": True},
+    {"id": "budhana_poshakulu", "name": "Budhana Poshakulu", "amount": 10000,
+     "category": "corpus_fund_receipt", "description": "Budhana patron sponsorship",
+     "allow_custom": True},
+    {"id": "vedanidhi", "name": "Vedanidhi", "amount": 5000,
+     "category": "corpus_fund_receipt", "description": "Support Vedic scholars / education",
+     "allow_custom": True},
+    {"id": "gonidhi", "name": "Gonidhi (Gau Seva)", "amount": 5000,
+     "category": "corpus_fund_receipt", "description": "Cow protection contribution",
+     "allow_custom": True},
+]
+
+
+def get_donation_categories() -> list[dict]:
+    """Return the donation category groups."""
+    return DONATION_CATEGORIES
+
+
+def get_sevas_by_category() -> dict:
+    """Group the donation/seva options by category (for grouped UI)."""
+    grouped = {c["id"]: {"name": c["name"], "options": []} for c in DONATION_CATEGORIES}
+    for s in SEVA_OPTIONS:
+        cat = s.get("category", "general")
+        grouped.setdefault(cat, {"name": cat, "options": []})
+        grouped[cat]["options"].append(s)
+    return grouped
 
 
 def load_sevas_from_firestore():
@@ -86,6 +149,110 @@ def _persist_seva(seva: dict):
             _db.collection("sevas").document(seva["id"]).set(seva)
     except Exception:
         pass
+
+
+# === PAYMENT METHODS ===
+# Karivena accepts these payment methods. "online" uses the Razorpay link
+# (WhatsApp checkout); the others are recorded manually by staff at the counter
+# (typical for walk-in bookings) or reconciled after an offline transfer.
+PAYMENT_METHODS = [
+    {"id": "cash", "name": "Cash", "online": False, "needs_reference": False,
+     "reference_label": ""},
+    {"id": "card", "name": "Card (Credit/Debit)", "online": False, "needs_reference": True,
+     "reference_label": "Card txn / approval code"},
+    {"id": "upi", "name": "UPI", "online": False, "needs_reference": True,
+     "reference_label": "UPI transaction ID / UTR"},
+    {"id": "cheque", "name": "Cheque", "online": False, "needs_reference": True,
+     "reference_label": "Cheque number + bank"},
+    {"id": "online", "name": "Online (Razorpay link via WhatsApp)", "online": True,
+     "needs_reference": False, "reference_label": ""},
+]
+
+_VALID_METHOD_IDS = {m["id"] for m in PAYMENT_METHODS}
+
+
+def get_payment_methods() -> list[dict]:
+    """Return the accepted payment methods (for UI dropdowns / voice options)."""
+    return PAYMENT_METHODS
+
+
+def is_valid_payment_method(method_id: str) -> bool:
+    return (method_id or "").strip().lower() in _VALID_METHOD_IDS
+
+
+def record_manual_payment(
+    booking_id: str,
+    amount_inr: int,
+    method: str,
+    customer_name: str = "",
+    customer_phone: str = "",
+    reference: str = "",
+    payment_type: str = "room_booking",
+    collected_by: str = "",
+) -> dict:
+    """
+    Record an OFFLINE payment (Cash / Card / UPI / Cheque) taken at the counter.
+    Used for walk-in bookings and manual reconciliation.
+
+    - For methods that need a reference (card/upi/cheque), 'reference' should be
+      the txn id / cheque number.
+    - Cheque payments start as 'pending' (until cleared); others are 'paid'.
+    Returns the payment record.
+    """
+    method = (method or "").strip().lower()
+    if method not in _VALID_METHOD_IDS:
+        return {"success": False, "error": f"Invalid payment method '{method}'. "
+                                            f"Valid: {sorted(_VALID_METHOD_IDS)}"}
+    if method == "online":
+        return {"success": False, "error": "Use create_room_payment_link for online payments"}
+
+    meta = next(m for m in PAYMENT_METHODS if m["id"] == method)
+    if meta["needs_reference"] and not reference:
+        return {"success": False, "error": f"{meta['name']} requires a reference "
+                                           f"({meta['reference_label']})"}
+
+    ref_id = f"MAN-{uuid.uuid4().hex[:8].upper()}"
+    # Cheques are provisional until cleared
+    status = "pending" if method == "cheque" else "paid"
+
+    record = {
+        "payment_id": ref_id,
+        "type": payment_type,            # room_booking | donation
+        "method": method,
+        "method_name": meta["name"],
+        "reference": reference,
+        "booking_id": booking_id,
+        "amount": int(amount_inr),
+        "currency": "INR",
+        "customer_name": customer_name,
+        "customer_phone": customer_phone,
+        "link": None,                    # offline — no link
+        "status": status,
+        "collected_by": collected_by,
+        "is_manual": True,
+        "created_at": datetime.now().isoformat(),
+    }
+    if status == "paid":
+        record["paid_at"] = datetime.now().isoformat()
+
+    _payment_links[ref_id] = record
+    _sync_payment(record)
+    logger.info(f"Manual payment recorded: {ref_id} {method} INR {amount_inr} ({status})")
+    return {"success": True, **record}
+
+
+def clear_cheque(payment_id: str) -> dict:
+    """Mark a pending cheque payment as cleared/paid."""
+    rec = _payment_links.get(payment_id)
+    if not rec:
+        return {"success": False, "error": "Payment not found"}
+    if rec.get("method") != "cheque":
+        return {"success": False, "error": "Not a cheque payment"}
+    rec["status"] = "paid"
+    rec["paid_at"] = datetime.now().isoformat()
+    _sync_payment(rec)
+    # Fire the automation loop (e.g. 80G cert if it was a donation)
+    return handle_payment_confirmed(payment_id=payment_id)
 
 
 def init_razorpay():
@@ -299,6 +466,8 @@ def create_seva_donation_link(
         amount = int(custom_amount_inr)
         is_custom = True
 
+    # General Donation (predefined amount 0) needs the donor to choose an amount;
+    # if none given, the link is created as flexible (donor enters amount).
     record = create_donation_link(
         customer_name=customer_name,
         customer_phone=customer_phone,
@@ -307,6 +476,7 @@ def create_seva_donation_link(
     # Enrich with seva + 80G metadata
     record["seva_id"] = seva_id
     record["seva_name"] = seva["name"]
+    record["category"] = seva.get("category", "general")
     record["is_custom_amount"] = is_custom
     record["is_80g"] = True
     _payment_links[record["payment_id"]] = record
@@ -350,6 +520,16 @@ def get_payment_stats() -> dict:
                              and p.get("is_80g"))
     certs_issued = sum(1 for p in _payment_links.values()
                        if p.get("is_80g") and p.get("certificate_80g_issued"))
+
+    # Revenue broken down by payment method (paid only)
+    by_method = {}
+    for m in _VALID_METHOD_IDS:
+        by_method[m] = sum(p["amount"] for p in _payment_links.values()
+                           if p.get("status") == "paid"
+                           and (p.get("method") or ("online" if p.get("link") else "cash")) == m)
+    pending_cheques = sum(1 for p in _payment_links.values()
+                          if p.get("method") == "cheque" and p.get("status") == "pending")
+
     return {
         "total_links": total,
         "paid": paid,
@@ -358,6 +538,8 @@ def get_payment_stats() -> dict:
         "donation_total": donation_total,
         "donation_80g_total": donation_80g_total,
         "certificates_80g_issued": certs_issued,
+        "revenue_by_method": by_method,
+        "pending_cheques": pending_cheques,
         "mode": "mock" if _mock_mode else "live",
     }
 

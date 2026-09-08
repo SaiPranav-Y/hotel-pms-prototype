@@ -1,0 +1,131 @@
+{
+  "brundavanam": {
+    "ac": {
+      "base": 1200,
+      "seasons": [],
+      "price_tiers": {
+        "1200": 5
+      }
+    }
+  },
+  "kasi": {
+    "ac": {
+      "base": 1800,
+      "seasons": [],
+      "price_tiers": {
+        "500": 18,
+        "1600": 5,
+        "1800": 35,
+        "2500": 2,
+        "4000": 2,
+        "8000": 1
+      }
+    }
+  },
+  "mahanandi": {
+    "ac": {
+      "base": 1200,
+      "seasons": [],
+      "price_tiers": {
+        "1200": 7
+      }
+    },
+    "nonac": {
+      "base": 600,
+      "seasons": [],
+      "price_tiers": {
+        "600": 20
+      }
+    }
+  },
+  "naimisaranyam": {
+    "nonac": {
+      "base": 700,
+      "seasons": [],
+      "price_tiers": {
+        "700": 3,
+        "900": 1
+      }
+    }
+  },
+  "tirupathi": {
+    "ac": {
+      "base": 1500,
+      "seasons": [],
+      "price_tiers": {
+        "300": 20,
+        "1500": 10,
+        "2000": 5,
+        "2500": 5
+      }
+    }
+  },
+  "vruddasramam": {
+    "ac": {
+      "base": 1500,
+      "seasons": [],
+      "price_tiers": {
+        "1500": 2
+      }
+    }
+  },
+  "rameswaram": {
+    "ac": {
+      "base": 1200,
+      "seasons": [],
+      "price_tiers": {
+        "1200": 7,
+        "2400": 1
+      }
+    },
+    "nonac": {
+      "base": 700,
+      "seasons": [],
+      "price_tiers": {
+        "700": 7
+      }
+    }
+  },
+  "srisailam": {
+    "ac": {
+      "base": 1500,
+      "seasons": [],
+      "price_tiers": {
+        "1500": 69,
+        "2500": 2
+      }
+    },
+    "nonac": {
+      "base": 500,
+      "seasons": [],
+      "price_tiers": {
+        "300": 12,
+        "500": 10,
+        "700": 4,
+        "800": 7
+      }
+    }
+  },
+  "shiridi": {
+    "ac": {
+      "base": 1500,
+      "seasons": [],
+      "price_tiers": {
+        "1000": 12,
+        "1200": 12,
+        "1500": 21
+      }
+    },
+    "nonac": {
+      "base": 1000,
+      "seasons": [],
+      "price_tiers": {
+        "300": 1,
+        "600": 12,
+        "800": 12,
+        "1000": 21,
+        "2500": 1
+      }
+    }
+  }
+}

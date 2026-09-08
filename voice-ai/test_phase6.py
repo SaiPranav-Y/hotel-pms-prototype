@@ -114,15 +114,15 @@ try:
     assert combo["donation"]["is_80g"] is True
     ok("Type 2: room + donation (80G on donation)")
 
-    # Type 3: seva donation
-    seva = create_seva_donation_link("Tester", "+919999999999", "annadanam")
+    # Type 3: seva donation (real Karivena option)
+    seva = create_seva_donation_link("Tester", "+919999999999", "nityannadanam")
     assert seva["success"]
-    assert seva["amount"] == 1116
+    assert seva["amount"] == 30000
     assert seva["is_80g"] is True
     ok("Type 3: seva donation (predefined, 80G)")
 
     # Custom seva amount
-    seva_c = create_seva_donation_link("Tester", "+919999999999", "deeparadhana", custom_amount_inr=500)
+    seva_c = create_seva_donation_link("Tester", "+919999999999", "one_day_annadanam", custom_amount_inr=500)
     assert seva_c["success"]
     assert seva_c["amount"] == 500
     assert seva_c["is_custom_amount"] is True

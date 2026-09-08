@@ -39,7 +39,7 @@ try:
     from app import payments
 
     # A donation, once confirmed, should auto-issue an 80G certificate.
-    d = payments.create_seva_donation_link("Auto Test", "+919000000010", "annadanam")
+    d = payments.create_seva_donation_link("Auto Test", "+919000000010", "nityannadanam")
     assert d["success"]
     assert d.get("certificate_80g_issued") in (False, None)
 
@@ -91,7 +91,7 @@ try:
     ok("HMAC signature: valid accepted, invalid rejected")
 
     # Event parsing
-    d = payments.create_seva_donation_link("Hook Test", "+919000000012", "nitya_pooja")
+    d = payments.create_seva_donation_link("Hook Test", "+919000000012", "one_day_annadanam")
     payload = {"event": "payment_link.paid",
                "payload": {"payment_link": {"entity": {"reference_id": d["payment_id"]}}}}
     parsed = payments.parse_webhook_event(payload)

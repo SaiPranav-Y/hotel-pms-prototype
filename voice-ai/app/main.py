@@ -39,6 +39,8 @@ from app.payments import (
     create_room_plus_donation_link, create_seva_donation_link,
     set_seva_amount, get_80g_donations,
     verify_webhook_signature, handle_payment_confirmed, parse_webhook_event,
+    get_payment_methods, record_manual_payment, clear_cheque,
+    get_donation_categories, get_sevas_by_category,
 )
 from app import roles as roles_mod
 from app import rates as rates_mod
@@ -364,12 +366,70 @@ async def api_payment_webhook(request: Request):
     return JSONResponse(content={"handled": False, "event": parsed["event"]})
 
 
+# === PAYMENT METHODS (Cash / Card / UPI / Cheque / Online) ===
+
+@app.get("/api/payments/methods")
+async def api_payment_methods():
+    """List accepted payment methods (for dropdowns / voice options)."""
+    return JSONResponse(content={"methods": get_payment_methods()})
+
+
+@app.post("/api/payments/manual")
+async def api_record_manual_payment(request: Request):
+    """
+    Record an offline payment (Cash / Card / UPI / Cheque) — typically for a
+    walk-in booking taken at the counter. Requires generate_invoice permission
+    (supervisor+). Cheque payments are recorded as pending until cleared.
+    Body: {booking_id, amount, method, customer_name, customer_phone,
+           reference, payment_type}
+    """
+    denied = _guard(request, "generate_invoice")
+    if denied:
+        return denied
+    body = await request.json()
+    result = record_manual_payment(
+        booking_id=body.get("booking_id", ""),
+        amount_inr=int(body.get("amount", 0)),
+        method=body.get("method", ""),
+        customer_name=body.get("customer_name", ""),
+        customer_phone=body.get("customer_phone", ""),
+        reference=body.get("reference", ""),
+        payment_type=body.get("payment_type", "room_booking"),
+        collected_by=_caller(request) or "staff",
+    )
+    code = 200 if result.get("success") else 400
+    return JSONResponse(status_code=code, content=result)
+
+
+@app.post("/api/payments/{payment_id}/clear-cheque")
+async def api_clear_cheque(payment_id: str, request: Request):
+    """Mark a pending cheque as cleared (supervisor+). Fires automation loop."""
+    denied = _guard(request, "generate_invoice")
+    if denied:
+        return denied
+    result = clear_cheque(payment_id)
+    code = 200 if result.get("success") else 400
+    return JSONResponse(status_code=code, content=result)
+
+
 # === DONATIONS ===
 
 @app.get("/api/donations/sevas")
 async def api_sevas():
-    """List available seva donation plans."""
+    """List available seva/donation plans (flat list)."""
     return JSONResponse(content={"sevas": get_seva_options()})
+
+
+@app.get("/api/donations/categories")
+async def api_donation_categories():
+    """List donation category groups (General, Corpus Fund Donations, Corpus Fund Receipt)."""
+    return JSONResponse(content={"categories": get_donation_categories()})
+
+
+@app.get("/api/donations/grouped")
+async def api_donations_grouped():
+    """Donation options grouped by category (for grouped dropdowns / UI)."""
+    return JSONResponse(content={"grouped": get_sevas_by_category()})
 
 
 @app.post("/api/donations")
