@@ -26,15 +26,18 @@ logger = logging.getLogger(__name__)
 _OUT_DIR = Path(__file__).parent / "generated" / "invoices"
 _OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-# Organisation details (update with real trust details when provided)
+# Organisation details.
+# Official trust name is confirmed (from the Karivena room-details records).
+# Address / GSTIN / PAN / contact to be finalised with the trust office
+# (shared by Harkare Srinivas Garu) — placeholders remain until then.
 ORG = {
-    "name": "Karivena Satram",
-    "subtitle": "Pilgrim Accommodation & Devotional Services",
-    "address": "Karivena, Andhra Pradesh, India",
-    "email": "info@karivenasatram.org",
-    "phone": "+91-XXXXXXXXXX",
-    "gstin": "",   # fill when available
-    "pan": "",     # fill when available
+    "name": "Akhila Bharatheeya Brahmana Karivena Nityannadana Satram",
+    "subtitle": "Pilgrim Accommodation & Nityannadanam Services",
+    "address": "Karivena, Andhra Pradesh, India",   # TODO: full registered address
+    "email": "info@karivenasatram.org",              # TODO: official email
+    "phone": "+91-XXXXXXXXXX",                        # TODO: official contact
+    "gstin": "",   # fill when available (if registered)
+    "pan": "",     # fill when available (trust PAN)
 }
 
 BRAND = colors.HexColor("#8B4513")   # saffron-brown

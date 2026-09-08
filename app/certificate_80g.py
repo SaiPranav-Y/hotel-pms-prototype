@@ -28,15 +28,17 @@ logger = logging.getLogger(__name__)
 _OUT_DIR = Path(__file__).parent / "generated" / "certificates"
 _OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-# Fill these when the client provides official 80G approval details.
+# Trust name is confirmed. The 80G registration number + trust PAN are pending
+# from the trust office — until BOTH are filled, certificates print with a DRAFT
+# watermark (donors avail 80G post-donation once these are issued).
 TRUST_80G = {
-    "name": "Karivena Satram",
-    "address": "Karivena, Andhra Pradesh, India",
-    "pan": "",                    # Trust PAN
-    "reg_80g_number": "",         # 80G approval / registration number
-    "reg_80g_date": "",           # date of approval
-    "email": "info@karivenasatram.org",
-    "phone": "+91-XXXXXXXXXX",
+    "name": "Akhila Bharatheeya Brahmana Karivena Nityannadana Satram",
+    "address": "Karivena, Andhra Pradesh, India",   # TODO: full registered address
+    "pan": "",                    # TODO: Trust PAN
+    "reg_80g_number": "",         # TODO: 80G approval / registration number
+    "reg_80g_date": "",           # TODO: date of approval
+    "email": "info@karivenasatram.org",              # TODO: official email
+    "phone": "+91-XXXXXXXXXX",                        # TODO: official contact
 }
 
 BRAND = colors.HexColor("#8B4513")
