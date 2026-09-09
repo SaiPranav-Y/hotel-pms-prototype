@@ -94,6 +94,7 @@ def save_booking_to_firebase(booking: dict) -> bool:
         doc_data = {
             "customer_name": booking.get("customer_name", ""),
             "customer_phone": booking.get("customer_phone", ""),
+            "customer_email": booking.get("customer_email", ""),
             "customer_age": int(booking.get("customer_age", 0) or 0),
             "gotram": booking.get("gotram", ""),
             "temple_name": booking.get("location", booking.get("temple", "")),

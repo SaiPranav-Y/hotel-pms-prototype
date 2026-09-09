@@ -15,11 +15,37 @@ Auth credentials will be provided later. For now this provides:
   - a require_role() dependency helper for FastAPI routes
 """
 
+import hashlib
+import hmac
 import logging
+import os
+import secrets
 from datetime import datetime
 from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+
+# === PASSWORD HASHING (stdlib pbkdf2 — no external deps) ===
+
+def hash_password(password: str, salt: str = "") -> str:
+    """Return a salted PBKDF2-SHA256 hash string: pbkdf2$<salt>$<hexdigest>."""
+    if not salt:
+        salt = secrets.token_hex(16)
+    dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"),
+                             salt.encode("utf-8"), 120_000)
+    return f"pbkdf2${salt}${dk.hex()}"
+
+
+def verify_password(password: str, stored: str) -> bool:
+    """Verify a plaintext password against a stored pbkdf2 hash."""
+    try:
+        scheme, salt, _ = stored.split("$", 2)
+        if scheme != "pbkdf2":
+            return False
+        return hmac.compare_digest(hash_password(password, salt), stored)
+    except Exception:
+        return False
 
 # === ROLE DEFINITIONS ===
 
@@ -92,8 +118,9 @@ def get_all_roles() -> list[dict]:
 
 # === USER MANAGEMENT ===
 
-def create_user(email: str, name: str, role: str, created_by: str = "system") -> dict:
-    """Create a staff user with a role."""
+def create_user(email: str, name: str, role: str, created_by: str = "system",
+                password: str = "") -> dict:
+    """Create a staff user with a role (and optional login password)."""
     if role not in ROLES:
         return {"success": False, "error": f"Invalid role. Use: {ROLES}"}
 
@@ -105,6 +132,8 @@ def create_user(email: str, name: str, role: str, created_by: str = "system") ->
         "created_by": created_by,
         "created_at": datetime.now().isoformat(),
     }
+    if password:
+        user["password_hash"] = hash_password(password)
     _users[user["email"]] = user
 
     # Firebase sync
@@ -116,7 +145,49 @@ def create_user(email: str, name: str, role: str, created_by: str = "system") ->
         pass
 
     logger.info(f"User created: {email} ({role})")
-    return {"success": True, "user": user}
+    # Never return the hash to callers
+    safe = {k: v for k, v in user.items() if k != "password_hash"}
+    return {"success": True, "user": safe}
+
+
+def set_password(email: str, password: str) -> dict:
+    """Set / reset a user's login password."""
+    u = get_user(email)
+    if not u:
+        return {"success": False, "error": "User not found"}
+    u["password_hash"] = hash_password(password)
+    _users[email.lower().strip()] = u
+    try:
+        from app.firebase_store import is_firebase_active, _db
+        if is_firebase_active() and _db:
+            _db.collection("users").document(email.lower().strip()).update(
+                {"password_hash": u["password_hash"]})
+    except Exception:
+        pass
+    return {"success": True}
+
+
+def authenticate(email: str, password: str) -> dict:
+    """
+    App-level login: verify email + password against the stored hash.
+    (Firebase Auth can be used instead in the Flutter app; this supports the
+    web dashboard / API and local testing.)
+    """
+    u = get_user(email)
+    if not u:
+        return {"success": False, "error": "Invalid email or password"}
+    if not u.get("active", True):
+        return {"success": False, "error": "Account is inactive"}
+    stored = u.get("password_hash", "")
+    if not stored or not verify_password(password, stored):
+        return {"success": False, "error": "Invalid email or password"}
+    return {
+        "success": True,
+        "email": u["email"],
+        "name": u.get("name", ""),
+        "role": u.get("role"),
+        "permissions": get_role_permissions(u.get("role")),
+    }
 
 
 def get_user(email: str) -> dict | None:
@@ -164,7 +235,7 @@ def assign_role(email: str, new_role: str) -> dict:
 
 
 def get_all_users() -> list[dict]:
-    """List all staff users."""
+    """List all staff users (password hashes stripped)."""
     # Refresh from Firestore
     try:
         from app.firebase_store import is_firebase_active, _db
@@ -173,7 +244,8 @@ def get_all_users() -> list[dict]:
                 _users[doc.id] = doc.to_dict()
     except Exception:
         pass
-    return list(_users.values())
+    return [{k: v for k, v in u.items() if k != "password_hash"}
+            for u in _users.values()]
 
 
 def load_users():

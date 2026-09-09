@@ -185,6 +185,7 @@ def create_booking(
     num_guests: int = 1,
     customer_age: str = "",
     gotram: str = "",
+    customer_email: str = "",
     send_whatsapp: bool = True,
 ) -> dict:
     """
@@ -201,20 +202,34 @@ def create_booking(
     and sends a WhatsApp confirmation message.
     """
     # === MANDATORY FIELD VALIDATION ===
+    # Required: Name, Phone, Gotram, Email, Location, Room type, Stay span.
     missing = []
     if not customer_name or not customer_name.strip():
         missing.append("name")
-    if not location or not location.strip():
-        missing.append("location (city)")
-    if not room_type or not room_type.strip():
-        missing.append("room type")
+    if not customer_phone or not str(customer_phone).strip():
+        missing.append("phone number")
     if not gotram or not gotram.strip():
         missing.append("gotram")
+    if not customer_email or not customer_email.strip():
+        missing.append("email (Mail ID)")
+    if not location or not location.strip():
+        missing.append("location (place)")
+    if not room_type or not room_type.strip():
+        missing.append("room type")
     if missing:
         return {
             "success": False,
             "error": f"Missing mandatory details: {', '.join(missing)}.",
             "missing_fields": missing,
+        }
+
+    # Email format validation
+    import re as _re
+    if not _re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", customer_email.strip()):
+        return {
+            "success": False,
+            "error": f"'{customer_email}' does not look like a valid email address.",
+            "invalid_field": "email",
         }
 
     # === GOTRAM ELIGIBILITY CHECK ===
@@ -250,6 +265,7 @@ def create_booking(
         "booking_id": booking_id,
         "customer_name": customer_name,
         "customer_phone": customer_phone,
+        "customer_email": customer_email.strip(),
         "customer_age": customer_age,
         "gotram": matched_gotram,
         "location": loc.get("name", location),
@@ -332,8 +348,11 @@ def create_booking(
         "success": True,
         "booking_id": booking_id,
         "confirmation": f"Booking confirmed. ID: {booking_id}",
+        "total_price": booking.get("total_price", 0),
         "payment_link": payment_link,
         "donation_link": donation_link,
+        "payment_id": booking.get("payment_id"),
+        "donation_id": booking.get("donation_id"),
         "whatsapp_sent": whatsapp_sent,
         "details": booking,
     }
