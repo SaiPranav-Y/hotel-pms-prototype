@@ -85,9 +85,9 @@ def t_donation_seva():
     from app.payments import create_donation_link, get_seva_options
     sevas = get_seva_options()
     assert len(sevas) >= 6
-    r = create_donation_link("Devotee", "9876543210", seva_id="annadanam")
-    assert r["seva_id"] == "annadanam"
-    assert r["amount"] == 1116
+    r = create_donation_link("Devotee", "9876543210", seva_id="nityannadanam")
+    assert r["seva_id"] == "nityannadanam"
+    assert r["amount"] == 30000
     return True
 
 
@@ -151,7 +151,7 @@ def t_booking_rejects_bad_gotram():
         location="Srisailam", room_type="ac",
         check_in=date.today() + timedelta(days=10),
         check_out=date.today() + timedelta(days=12),
-        gotram="FakeGotram123",
+        gotram="FakeGotram123", customer_email="test@example.com",
     )
     assert r["success"] == False
     assert r.get("gotram_rejected") == True
@@ -165,7 +165,7 @@ def t_booking_success_with_gotram():
         location="Srisailam", room_type="ac",
         check_in=date.today() + timedelta(days=20),
         check_out=date.today() + timedelta(days=22),
-        gotram="Bharadwaja",
+        gotram="Bharadwaja", customer_email="ravi@example.com",
         send_whatsapp=True,
     )
     assert r["success"] == True, f"Booking failed: {r}"

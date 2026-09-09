@@ -24,6 +24,10 @@ RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID", "")
 RAZORPAY_KEY_SECRET = os.getenv("RAZORPAY_KEY_SECRET", "")
 # Webhook secret configured in the Razorpay dashboard (Settings -> Webhooks).
 RAZORPAY_WEBHOOK_SECRET = os.getenv("RAZORPAY_WEBHOOK_SECRET", "")
+# Trust UPI VPA (e.g. "karivena@sbi") — enables a working UPI deep link even
+# before Razorpay live keys are set. Payee name shown in the UPI app.
+UPI_VPA = os.getenv("UPI_VPA", "")
+UPI_PAYEE_NAME = os.getenv("UPI_PAYEE_NAME", "Karivena Satram")
 
 _client = None
 _mock_mode = True
@@ -623,11 +627,42 @@ def handle_payment_confirmed(reference_id: str = "", payment_id: str = "") -> di
         "payment_id": pid,
         "type": record.get("type"),
         "was_already_paid": already_paid,
+        "receipt": None,
         "certificate_80g": None,
         "whatsapp": None,
     }
 
-    # Auto-issue 80G certificate for donations
+    phone = record.get("customer_phone", "")
+    cust = record.get("customer_name", "Guest")
+
+    # 1. RECEIPT (invoice) — generated for room bookings (and any paid payment
+    #    linked to a booking). Pushed to the customer's WhatsApp.
+    if record.get("type") in ("room_booking", "room_plus_donation") or record.get("booking_id"):
+        try:
+            from app import invoice as invoice_mod
+            booking = _lookup_booking(record.get("booking_id", ""))
+            inv_input = booking or {
+                "booking_id": record.get("booking_id", pid),
+                "customer_name": cust,
+                "customer_phone": phone,
+                "customer_email": record.get("customer_email", ""),
+                "room_amount": record.get("amount", 0),
+                "payment_status": "Paid",
+            }
+            inv = invoice_mod.generate_invoice(inv_input)
+            result["receipt"] = {"invoice_no": inv["invoice_no"], "file": inv["file_path"]}
+            if phone:
+                try:
+                    from app import whatsapp
+                    cap = whatsapp.compose_document_message(cust, "invoice", inv["invoice_no"])
+                    whatsapp.send_whatsapp_document(phone, inv["file_path"], cap)
+                except Exception as e:
+                    logger.error(f"[Automation] receipt WhatsApp push failed: {e}")
+        except Exception as e:
+            logger.error(f"[Automation] receipt generation failed: {e}")
+            result["receipt_error"] = str(e)
+
+    # 2. Auto-issue 80G certificate for donations
     if record.get("is_80g") and not record.get("certificate_80g_issued"):
         try:
             from app import certificate_80g
@@ -638,13 +673,10 @@ def handle_payment_confirmed(reference_id: str = "", payment_id: str = "") -> di
                 "file": cert["file_path"],
             }
             # Push to WhatsApp
-            phone = record.get("customer_phone", "")
             if phone:
                 try:
                     from app import whatsapp
-                    caption = whatsapp.compose_document_message(
-                        record.get("customer_name", "Donor"), "80g", cert["certificate_no"]
-                    )
+                    caption = whatsapp.compose_document_message(cust, "80g", cert["certificate_no"])
                     wa = whatsapp.send_whatsapp_document(phone, cert["file_path"], caption)
                     result["whatsapp"] = wa.get("provider")
                 except Exception as e:
@@ -653,8 +685,36 @@ def handle_payment_confirmed(reference_id: str = "", payment_id: str = "") -> di
             logger.error(f"[Automation] 80G certificate generation failed: {e}")
             result["certificate_error"] = str(e)
 
-    logger.info(f"[Automation] Payment confirmed {pid} — cert={bool(result['certificate_80g'])}")
+    logger.info(f"[Automation] Payment confirmed {pid} — "
+                f"receipt={bool(result['receipt'])} cert={bool(result['certificate_80g'])}")
     return result
+
+
+def _lookup_booking(booking_id: str) -> dict | None:
+    """Fetch the booking record (in-memory then Firestore) for receipt details."""
+    if not booking_id:
+        return None
+    try:
+        from app.knowledge_base import _bookings
+        if booking_id in _bookings:
+            b = _bookings[booking_id]
+            return {
+                "booking_id": booking_id,
+                "customer_name": b.get("customer_name", ""),
+                "customer_phone": b.get("customer_phone", ""),
+                "customer_email": b.get("customer_email", ""),
+                "gotram": b.get("gotram", ""),
+                "location": b.get("location", ""),
+                "room_type": b.get("room_type", ""),
+                "check_in": b.get("check_in", ""),
+                "check_out": b.get("check_out", ""),
+                "no_of_rooms": b.get("num_rooms", 1),
+                "room_amount": b.get("total_price", 0),
+                "payment_status": "Paid",
+            }
+    except Exception:
+        pass
+    return None
 
 
 def parse_webhook_event(payload: dict) -> dict:
@@ -685,8 +745,36 @@ def parse_webhook_event(payload: dict) -> dict:
 # === HELPERS ===
 
 def _mock_link(kind: str, ref_id: str, amount: int) -> str:
-    """Generate a fake but realistic-looking payment link for demos."""
+    """
+    Build a payment URL for demo / pre-live use.
+
+    If a UPI VPA is configured (UPI_VPA), return a REAL UPI deep link
+    (upi://pay?...) that opens the user's UPI app (GPay/PhonePe/Paytm) with the
+    payee, amount, and reference pre-filled. Otherwise fall back to a mock
+    Razorpay-style URL so the pipeline still completes.
+    """
+    if UPI_VPA:
+        return build_upi_url(ref_id, amount, note=f"Karivena {kind}")
     return f"https://rzp.io/i/MOCK-{kind}-{ref_id[-6:]}"
+
+
+def build_upi_url(ref_id: str, amount: int, note: str = "Karivena Satram") -> str:
+    """
+    Construct a UPI payment deep link (NPCI UPI URI spec).
+    Opens any UPI app: pa=payee VPA, pn=payee name, am=amount, tn=note, tr=ref.
+    Example: upi://pay?pa=karivena@sbi&pn=Karivena%20Satram&am=3000&cu=INR&tn=...
+    """
+    from urllib.parse import quote
+    params = [
+        f"pa={quote(UPI_VPA)}",
+        f"pn={quote(UPI_PAYEE_NAME)}",
+        f"tr={quote(ref_id)}",
+        f"tn={quote(note)}",
+        "cu=INR",
+    ]
+    if amount and amount > 0:
+        params.append(f"am={amount}")
+    return "upi://pay?" + "&".join(params)
 
 
 def _sync_payment(record: dict):

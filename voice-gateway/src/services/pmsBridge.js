@@ -53,6 +53,7 @@ async function createReservation(bookingData, callerPhone) {
     const reservation = {
       customer_name: bookingData.guest_name || '',
       customer_phone: callerPhone || '',
+      customer_email: bookingData.email || '',
       customer_age: 0,
       gotram: bookingData.gotram || '',
       temple_name: bookingData.location || '',

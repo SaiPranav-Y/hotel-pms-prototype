@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../constants/karivena_data.dart';
+import '../services/api_service.dart';
 
 /// Donations screen — shows the three Karivena donation categories and their
 /// options with amounts. All donations are 80G tax-exempt eligible (certificate
@@ -161,7 +164,7 @@ class _DonationCard extends StatelessWidget {
                   side: const BorderSide(color: Color(0xFF8B4513)),
                 ),
                 icon: const Icon(Icons.card_giftcard_rounded, size: 16),
-                label: const Text('Record'),
+                label: const Text('Donate'),
                 onPressed: () => _recordDonation(context, option),
               ),
             ),
@@ -181,7 +184,7 @@ class _DonationCard extends StatelessWidget {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text('Record — ${option.name}'),
+        title: Text('Donate — ${option.name}'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -223,23 +226,99 @@ class _DonationCard extends StatelessWidget {
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: const Color(0xFF8B4513)),
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Record'),
+            child: const Text('Get Payment Link'),
           ),
         ],
       ),
     );
 
-    if (ok == true && context.mounted) {
-      // NOTE: wiring to the backend /api/donations or Firestore happens where
-      // the API base URL is configured. For now confirm capture to the user.
+    if (ok != true || !context.mounted) return;
+
+    final amount = int.tryParse(amountCtrl.text.trim()) ?? 0;
+    // Call the backend to create the donation payment link (80G eligible).
+    const api = ApiService();
+    Map<String, dynamic> res;
+    try {
+      res = await api.createDonation(
+        customerName: nameCtrl.text.trim(),
+        customerPhone: phoneCtrl.text.trim(),
+        sevaId: option.id,
+        customAmount: amount,
+      );
+    } catch (e) {
+      res = {'success': false, 'error': 'Could not reach server ($e)'};
+    }
+    if (!context.mounted) return;
+
+    final ok2 = res['success'] != false && res['payment_id'] != null;
+    final link = (res['link'] ?? '').toString();
+
+    if (ok2) {
+      _showPaymentLink(context, option, link, res['payment_id'].toString());
+    } else {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-              'Donation recorded: ${option.name} — ₹${amountCtrl.text.isEmpty ? "0" : amountCtrl.text}'),
-          backgroundColor: const Color(0xFF8B4513),
+          content: Text('Could not create donation: ${res['error'] ?? 'unknown'}'),
+          backgroundColor: Colors.red.shade600,
         ),
       );
     }
+  }
+
+  /// Show the generated payment link (UPI/Razorpay) with open + copy actions.
+  void _showPaymentLink(BuildContext context, DonationOption option,
+      String link, String paymentId) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('${option.name} — Pay'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Scan / open the link below to pay via UPI or card:'),
+            const SizedBox(height: 10),
+            SelectableText(
+              link.isEmpty ? '(link unavailable)' : link,
+              style: const TextStyle(fontSize: 12, color: Color(0xFF8B4513)),
+            ),
+            const SizedBox(height: 10),
+            const Text(
+              'The 80G certificate is issued automatically after payment.',
+              style: TextStyle(fontSize: 11, color: Color(0xFF00875A)),
+            ),
+          ],
+        ),
+        actions: [
+          if (link.isNotEmpty)
+            TextButton.icon(
+              icon: const Icon(Icons.copy_rounded, size: 16),
+              label: const Text('Copy'),
+              onPressed: () {
+                Clipboard.setData(ClipboardData(text: link));
+                ScaffoldMessenger.of(ctx).showSnackBar(
+                  const SnackBar(content: Text('Payment link copied')),
+                );
+              },
+            ),
+          FilledButton.icon(
+            style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF8B4513)),
+            icon: const Icon(Icons.open_in_new_rounded, size: 16),
+            label: const Text('Open'),
+            onPressed: link.isEmpty
+                ? null
+                : () async {
+                    final uri = Uri.tryParse(link);
+                    if (uri != null) {
+                      await launchUrl(uri,
+                          mode: LaunchMode.externalApplication);
+                    }
+                  },
+          ),
+        ],
+      ),
+    );
   }
 
   /// Indian-style digit grouping, e.g. 500000 -> "5,00,000".

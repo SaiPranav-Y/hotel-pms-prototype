@@ -9,6 +9,7 @@ env/
 # Secrets / credentials
 .env
 firebase-key.json
+staff_credentials.txt
 
 # Generated artifacts (invoices, 80G certificates)
 app/generated/
@@ -16,6 +17,3 @@ app/generated/
 # OS
 .DS_Store
 Thumbs.db
-
-# Call recordings (demo/runtime artifacts)
-recordings/

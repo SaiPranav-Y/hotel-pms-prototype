@@ -35,6 +35,7 @@ from app.payments import (
     get_all_payments, get_payment, mark_paid, get_payment_stats,
 )
 from app.whatsapp import compose_donation_only_message, send_whatsapp, get_sent_log
+from app import whatsapp_flow
 from app.payments import (
     create_room_plus_donation_link, create_seva_donation_link,
     set_seva_amount, get_80g_donations,
@@ -461,6 +462,41 @@ async def api_whatsapp_log():
     return JSONResponse(content={"messages": get_sent_log()})
 
 
+@app.post("/api/whatsapp/incoming")
+async def api_whatsapp_incoming(request: Request):
+    """
+    Inbound WhatsApp message handler — drives the booking Q&A conversation.
+    The sender's phone number is used automatically (never asked).
+
+    Body (from your WhatsApp provider / webhook): {"from": "+91...", "text": "..."}
+    Also tolerant of Meta Cloud API shape (messages[0].from / .text.body).
+    Returns {"reply": "..."} and also sends the reply via WhatsApp.
+    """
+    body = await request.json()
+
+    # Extract sender + text from common webhook shapes
+    from_phone = body.get("from") or body.get("phone") or ""
+    text = body.get("text") or body.get("message") or ""
+    if not from_phone:
+        try:
+            msg = body["entry"][0]["changes"][0]["value"]["messages"][0]
+            from_phone = msg.get("from", "")
+            text = msg.get("text", {}).get("body", "") or text
+        except Exception:
+            pass
+
+    if not from_phone:
+        return JSONResponse(status_code=400, content={"error": "No sender phone in payload"})
+
+    reply = whatsapp_flow.handle_incoming(from_phone, text)
+    # Send the reply back to the user
+    try:
+        send_whatsapp(from_phone, reply)
+    except Exception:
+        pass
+    return JSONResponse(content={"reply": reply})
+
+
 @app.get("/health")
 async def health():
     return {
@@ -505,6 +541,19 @@ async def api_roles():
     return JSONResponse(content={"roles": roles_mod.get_all_roles()})
 
 
+@app.post("/api/login")
+async def api_login(request: Request):
+    """
+    Staff login (web dashboard / API). Body: {email, password}.
+    Returns role + permissions on success. (Flutter app may use Firebase Auth
+    instead; this backs the web dashboard and testing.)
+    """
+    body = await request.json()
+    result = roles_mod.authenticate(body.get("email", ""), body.get("password", ""))
+    code = 200 if result.get("success") else 401
+    return JSONResponse(status_code=code, content=result)
+
+
 @app.get("/api/users")
 async def api_users(request: Request):
     """List staff users (super_admin only)."""
@@ -516,7 +565,7 @@ async def api_users(request: Request):
 
 @app.post("/api/users")
 async def api_create_user(request: Request):
-    """Create a staff user (super_admin only)."""
+    """Create a staff user (super_admin only). Optional 'password' to set login."""
     denied = _guard(request, "manage_users")
     if denied:
         return denied
@@ -526,7 +575,20 @@ async def api_create_user(request: Request):
         name=body.get("name", ""),
         role=body.get("role", "supervisor"),
         created_by=_caller(request) or "system",
+        password=body.get("password", ""),
     )
+    code = 200 if result.get("success") else 400
+    return JSONResponse(status_code=code, content=result)
+
+
+@app.post("/api/users/{email}/password")
+async def api_set_password(email: str, request: Request):
+    """Set/reset a staff user's password (super_admin only)."""
+    denied = _guard(request, "manage_users")
+    if denied:
+        return denied
+    body = await request.json()
+    result = roles_mod.set_password(email, body.get("password", ""))
     code = 200 if result.get("success") else 400
     return JSONResponse(status_code=code, content=result)
 

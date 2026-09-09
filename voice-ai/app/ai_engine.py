@@ -50,24 +50,28 @@ LOCATIONS (with rooms):
 Check-in: {ORG_INFO['check_in_time']}, Check-out: {ORG_INFO['check_out_time']}
 ID required at check-in. Free cancellation up to 24 hours before.
 
-MANDATORY DETAILS to collect (ask ONE question at a time, be welcoming):
+MANDATORY DETAILS to collect (ask ONE question at a time, be welcoming). ALL are
+required before booking:
 1. Full name
-2. Gotram (REQUIRED — community eligibility)
-3. Which location (city) they want to stay at
-4. Type of room (AC or Non-AC)
-5. Span of stay: check-in and check-out dates. If the guest says a relative
+2. Phone number — DO NOT ASK if you already know the caller's number (it is the
+   number they are calling/texting from); reuse it silently. Only ask if unknown.
+3. Gotram (REQUIRED — community eligibility)
+4. Email (Mail ID) — for the receipt and 80G certificate
+5. Place / location they want to stay at
+6. Type of room (AC or Non-AC) — offer only what is AVAILABLE for their dates
+7. Span of stay: check-in and check-out dates. If the guest says a relative
    date ("tomorrow", "next weekend", "this Friday", "day after"), convert it to
-   an exact YYYY-MM-DD yourself using today's date below. If a date is ambiguous
-   (e.g. "next weekend" could mean Sat or Sun), briefly confirm the exact date
-   before booking. Never book with a vague date.
-6. Number of rooms
-7. Phone number (for WhatsApp confirmation and payment)
-Then confirm and book. After booking, tell them you have sent a WhatsApp message
-with the payment link and a donation option.
+   an exact YYYY-MM-DD yourself using today's date below. If a date is ambiguous,
+   briefly confirm the exact date before booking. Never book with a vague date.
+8. Number of rooms
+Always CHECK AVAILABILITY before confirming a room type. Then confirm the details
+back to the guest and book. After booking, tell them you have sent a WhatsApp
+message with the payment options and a donation option; the receipt (and an 80G
+certificate, if they donate) will follow after payment.
 
 TOOLS — use this exact format:
 TOOL_CALL: check_availability(location="name", room_type="ac|nonac", check_in="YYYY-MM-DD", check_out="YYYY-MM-DD", num_rooms=1)
-TOOL_CALL: create_booking(customer_name="Name", customer_phone="Phone", location="name", room_type="ac|nonac", check_in="YYYY-MM-DD", check_out="YYYY-MM-DD", num_rooms=1, num_guests=1, customer_age="Age", gotram="Gotram")
+TOOL_CALL: create_booking(customer_name="Name", customer_phone="Phone", customer_email="Email", location="name", room_type="ac|nonac", check_in="YYYY-MM-DD", check_out="YYYY-MM-DD", num_rooms=1, num_guests=1, customer_age="Age", gotram="Gotram")
 TOOL_CALL: cancel_booking(booking_id="BK-XXXXXXXX")
 
 Today is {date.today().isoformat()}. Keep responses SHORT."""
@@ -116,6 +120,7 @@ def _execute_tool(func_name: str, params: dict) -> str:
                 num_guests=int(params.get("num_guests", 1)),
                 customer_age=params.get("customer_age", ""),
                 gotram=params.get("gotram", ""),
+                customer_email=params.get("customer_email", ""),
             )
         elif func_name == "cancel_booking":
             result = cancel_booking(params.get("booking_id", ""))
