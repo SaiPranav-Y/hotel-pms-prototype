@@ -69,17 +69,20 @@ def main():
 
         if existing and reset:
             roles.assign_role(email, role)  # ensure role correct
-            roles.set_password(email, password)
+            res = roles.set_password(email, password)
+            fb = res.get("firebase_auth", {}).get("success")
             updated += 1
-            print(f"  [reset] {email} ({role})")
+            print(f"  [reset] {email} ({role}) | firebase_auth={fb}")
         else:
             r = roles.create_user(email=email, name=name, role=role,
                                   created_by="seed_staff", password=password)
             if not r.get("success"):
                 print(f"  [FAIL] {email}: {r.get('error')}")
                 continue
+            fb = r.get("firebase_auth", {})
+            note = "ok" if fb.get("success") else f"NO ({fb.get('error')})"
             created += 1
-            print(f"  [created] {email} ({role})")
+            print(f"  [created] {email} ({role}) | firebase_auth={note}")
 
         lines.append(f"{role:12} | {email:28} | {password}")
 
@@ -90,7 +93,8 @@ def main():
             "Karivena Satram — Staff Login Credentials\n"
             "==========================================\n"
             "KEEP THIS FILE SECURE. Delete after distributing.\n"
-            "Passwords are stored only as PBKDF2 hashes in Firestore.\n\n"
+            "These accounts work in BOTH the Flutter PMS (Firebase Auth) and the\n"
+            "Voice-AI backend (verifies via Firebase Auth, PBKDF2 fallback).\n\n"
             f"{'ROLE':12} | {'EMAIL':28} | PASSWORD\n"
             f"{'-'*12}-+-{'-'*28}-+-{'-'*14}\n"
         )

@@ -22,5 +22,10 @@ WHISPER_MODEL_SIZE = os.getenv("WHISPER_MODEL_SIZE", "base")  # tiny, base, smal
 # Piper TTS (local - free)
 PIPER_VOICE = os.getenv("PIPER_VOICE", "en_US-amy-medium")
 
+# Firebase Web API key — used by the Voice-AI backend to verify staff passwords
+# against Firebase Auth (same credentials the Flutter PMS uses). Find it in
+# Firebase console -> Project settings -> Web API Key.
+FIREBASE_WEB_API_KEY = os.getenv("FIREBASE_WEB_API_KEY", "")
+
 # Audio config
 SAMPLE_RATE = 16000

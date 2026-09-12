@@ -9,14 +9,23 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   try {
+    // Firebase config — overridable at build time via --dart-define so the
+    // project can point at a different Firebase project without editing code.
+    // Defaults to the Karivena demo project.
     await Firebase.initializeApp(
       options: const FirebaseOptions(
-        apiKey: 'AIzaSyC12tJyB-MuOt6wQLqMTElecRJ1j1BpYfM',
-        authDomain: 'hotel-pms-prototype.firebaseapp.com',
-        projectId: 'hotel-pms-prototype',
-        storageBucket: 'hotel-pms-prototype.firebasestorage.app',
-        messagingSenderId: '421799101876',
-        appId: '1:421799101876:web:3a68c294773201238edee1',
+        apiKey: String.fromEnvironment('FIREBASE_API_KEY',
+            defaultValue: 'AIzaSyC12tJyB-MuOt6wQLqMTElecRJ1j1BpYfM'),
+        authDomain: String.fromEnvironment('FIREBASE_AUTH_DOMAIN',
+            defaultValue: 'hotel-pms-prototype.firebaseapp.com'),
+        projectId: String.fromEnvironment('FIREBASE_PROJECT_ID',
+            defaultValue: 'hotel-pms-prototype'),
+        storageBucket: String.fromEnvironment('FIREBASE_STORAGE_BUCKET',
+            defaultValue: 'hotel-pms-prototype.firebasestorage.app'),
+        messagingSenderId: String.fromEnvironment('FIREBASE_MESSAGING_SENDER_ID',
+            defaultValue: '421799101876'),
+        appId: String.fromEnvironment('FIREBASE_APP_ID',
+            defaultValue: '1:421799101876:web:3a68c294773201238edee1'),
       ),
     ).timeout(const Duration(seconds: 10));
 

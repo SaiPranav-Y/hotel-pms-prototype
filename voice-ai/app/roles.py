@@ -116,16 +116,60 @@ def get_all_roles() -> list[dict]:
     ]
 
 
+# === FIREBASE AUTH BRIDGE ===
+# The Flutter PMS authenticates via Firebase Auth; the Voice-AI backend reads
+# roles from the Firestore `users` collection. To make ONE account work in BOTH
+# systems, we provision a Firebase Auth user (credentials) AND a Firestore doc
+# (role/profile) with the same email + password.
+
+def upsert_firebase_auth_user(email: str, password: str, name: str = "") -> dict:
+    """
+    Create or update a Firebase Auth user with the given email + password.
+    Returns {"success": bool, "uid": str|None, "created": bool, "error": str|None}.
+    Requires the Firebase Admin SDK to be initialised (firebase-key.json).
+    """
+    email = email.lower().strip()
+    try:
+        from app.firebase_store import is_firebase_active
+        if not is_firebase_active():
+            return {"success": False, "uid": None, "created": False,
+                    "error": "Firebase not active"}
+        from firebase_admin import auth as fb_auth
+        try:
+            existing = fb_auth.get_user_by_email(email)
+            # Update password/name on the existing Auth account
+            fb_auth.update_user(existing.uid, password=password,
+                                display_name=name or existing.display_name)
+            return {"success": True, "uid": existing.uid, "created": False, "error": None}
+        except fb_auth.UserNotFoundError:
+            created = fb_auth.create_user(email=email, password=password,
+                                          display_name=name or None,
+                                          email_verified=True)
+            return {"success": True, "uid": created.uid, "created": True, "error": None}
+    except Exception as e:
+        logger.error(f"Firebase Auth upsert failed for {email}: {e}")
+        return {"success": False, "uid": None, "created": False, "error": str(e)}
+
+
 # === USER MANAGEMENT ===
 
 def create_user(email: str, name: str, role: str, created_by: str = "system",
-                password: str = "") -> dict:
-    """Create a staff user with a role (and optional login password)."""
+                password: str = "", firebase_auth: bool = True) -> dict:
+    """
+    Create a staff user with a role (and optional login password).
+
+    When `password` is given and `firebase_auth` is True, ALSO provisions a
+    Firebase Auth account with the same email + password — so the SAME account
+    logs into both the Flutter PMS (Firebase Auth) and the Voice-AI backend
+    (which now verifies against Firebase Auth too). A PBKDF2 hash is still stored
+    as a local/offline fallback.
+    """
     if role not in ROLES:
         return {"success": False, "error": f"Invalid role. Use: {ROLES}"}
 
+    email = email.lower().strip()
     user = {
-        "email": email.lower().strip(),
+        "email": email,
         "name": name,
         "role": role,
         "active": True,
@@ -134,59 +178,133 @@ def create_user(email: str, name: str, role: str, created_by: str = "system",
     }
     if password:
         user["password_hash"] = hash_password(password)
-    _users[user["email"]] = user
+        user["auth_provider"] = "firebase"  # credentials verified via Firebase Auth
 
-    # Firebase sync
+    # Bridge: create the matching Firebase Auth account
+    auth_result = {"success": False, "created": False, "error": "skipped"}
+    if password and firebase_auth:
+        auth_result = upsert_firebase_auth_user(email, password, name)
+        if auth_result.get("uid"):
+            user["firebase_uid"] = auth_result["uid"]
+
+    _users[email] = user
+
+    # Firestore sync (role/profile source of truth)
     try:
         from app.firebase_store import is_firebase_active, _db
         if is_firebase_active() and _db:
-            _db.collection("users").document(user["email"]).set(user)
+            _db.collection("users").document(email).set(user)
     except Exception:
         pass
 
-    logger.info(f"User created: {email} ({role})")
-    # Never return the hash to callers
+    logger.info(f"User created: {email} ({role}) | firebase_auth={auth_result.get('success')}")
     safe = {k: v for k, v in user.items() if k != "password_hash"}
-    return {"success": True, "user": safe}
+    return {"success": True, "user": safe, "firebase_auth": auth_result}
 
 
-def set_password(email: str, password: str) -> dict:
-    """Set / reset a user's login password."""
+def set_password(email: str, password: str, firebase_auth: bool = True) -> dict:
+    """Set / reset a user's login password in BOTH Firebase Auth and Firestore."""
+    email = email.lower().strip()
     u = get_user(email)
     if not u:
         return {"success": False, "error": "User not found"}
     u["password_hash"] = hash_password(password)
-    _users[email.lower().strip()] = u
+    _users[email] = u
+
+    # Sync to Firebase Auth so Flutter + Voice-AI stay in step
+    auth_result = {"success": False, "error": "skipped"}
+    if firebase_auth:
+        auth_result = upsert_firebase_auth_user(email, password, u.get("name", ""))
+        if auth_result.get("uid"):
+            u["firebase_uid"] = auth_result["uid"]
+
     try:
         from app.firebase_store import is_firebase_active, _db
         if is_firebase_active() and _db:
-            _db.collection("users").document(email.lower().strip()).update(
-                {"password_hash": u["password_hash"]})
+            update = {"password_hash": u["password_hash"]}
+            if u.get("firebase_uid"):
+                update["firebase_uid"] = u["firebase_uid"]
+            _db.collection("users").document(email).update(update)
     except Exception:
         pass
-    return {"success": True}
+    return {"success": True, "firebase_auth": auth_result}
+
+
+def _verify_firebase_password(email: str, password: str) -> bool | None:
+    """
+    Verify email + password against Firebase Auth via the Identity Toolkit REST
+    API (same credentials the Flutter PMS uses). Returns:
+      True  -> verified
+      False -> wrong password / disabled
+      None  -> could not check (no web API key / network) -> caller falls back
+    """
+    try:
+        from app.config import FIREBASE_WEB_API_KEY
+    except Exception:
+        FIREBASE_WEB_API_KEY = ""
+    if not FIREBASE_WEB_API_KEY:
+        return None
+    try:
+        import httpx
+        url = ("https://identitytoolkit.googleapis.com/v1/accounts:"
+               f"signInWithPassword?key={FIREBASE_WEB_API_KEY}")
+        resp = httpx.post(url, json={
+            "email": email, "password": password, "returnSecureToken": True,
+        }, timeout=15)
+        if resp.status_code == 200:
+            return True
+        # 400 with INVALID_PASSWORD / EMAIL_NOT_FOUND etc.
+        return False
+    except Exception as e:
+        logger.debug(f"Firebase REST verify unavailable: {e}")
+        return None
 
 
 def authenticate(email: str, password: str) -> dict:
     """
-    App-level login: verify email + password against the stored hash.
-    (Firebase Auth can be used instead in the Flutter app; this supports the
-    web dashboard / API and local testing.)
+    App-level login for the Voice-AI backend / web dashboard.
+
+    Credential check order (bridge with the Flutter PMS):
+      1. Firebase Auth (REST) — the shared source of truth for passwords.
+      2. PBKDF2 hash in Firestore — offline / fallback when Firebase Auth
+         can't be reached or no web API key is configured.
+    Role + profile always come from the Firestore `users` doc.
     """
+    email = (email or "").lower().strip()
     u = get_user(email)
     if not u:
         return {"success": False, "error": "Invalid email or password"}
     if not u.get("active", True):
         return {"success": False, "error": "Account is inactive"}
-    stored = u.get("password_hash", "")
-    if not stored or not verify_password(password, stored):
+
+    verified = False
+    method = None
+
+    # 1. Firebase Auth (shared with Flutter)
+    fb = _verify_firebase_password(email, password)
+    if fb is True:
+        verified, method = True, "firebase"
+    elif fb is False:
+        # Firebase reachable and rejected — but still allow PBKDF2 in case the
+        # account exists only locally. If a hash exists, check it; else deny.
+        pass
+
+    # 2. PBKDF2 fallback
+    if not verified:
+        stored = u.get("password_hash", "")
+        if stored and verify_password(password, stored):
+            verified, method = True, "pbkdf2"
+
+    if not verified:
         return {"success": False, "error": "Invalid email or password"}
+
     return {
         "success": True,
         "email": u["email"],
         "name": u.get("name", ""),
         "role": u.get("role"),
         "permissions": get_role_permissions(u.get("role")),
+        "auth_method": method,
     }
 
 
