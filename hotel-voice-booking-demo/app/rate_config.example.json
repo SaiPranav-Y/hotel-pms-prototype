@@ -1,0 +1,15 @@
+{
+  "_comment": "Copy this to rate_config.json and fill real rates. Keys are location names lowercased with underscores. room types: 'ac' and 'nonac'. 'base' is the nightly rate in INR. 'seasons' are optional date-range overrides (festival pricing etc).",
+  "srisailam": {
+    "ac":    { "base": 1200, "seasons": [ { "name": "Maha Shivaratri", "from": "2027-03-01", "to": "2027-03-10", "rate": 1800 } ] },
+    "nonac": { "base": 600,  "seasons": [] }
+  },
+  "shiridi": {
+    "ac":    { "base": 1500, "seasons": [] },
+    "nonac": { "base": 700,  "seasons": [] }
+  },
+  "tirupathi": {
+    "ac":    { "base": 1400, "seasons": [] },
+    "nonac": { "base": 650,  "seasons": [] }
+  }
+}
