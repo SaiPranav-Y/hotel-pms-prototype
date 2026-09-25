@@ -201,7 +201,15 @@ def create_booking(
     On success: generates Razorpay payment link + donation link,
     and sends a WhatsApp confirmation message.
     """
-    # === MANDATORY FIELD VALIDATION ===
+    # === SANITIZE + VALIDATE INPUT ===
+    from app import validators as _v
+    customer_name = _v.sanitize_name(customer_name)
+    location = _v.sanitize_text(location, 80)
+    customer_email = _v.sanitize_text(customer_email, 120)
+    gotram = _v.sanitize_text(gotram, 60)
+    if customer_phone:
+        customer_phone = _v.normalize_phone(customer_phone)
+
     # Required: Name, Phone, Gotram, Email, Location, Room type, Stay span.
     missing = []
     if not customer_name or not customer_name.strip():
@@ -223,14 +231,25 @@ def create_booking(
             "missing_fields": missing,
         }
 
-    # Email format validation
-    import re as _re
-    if not _re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", customer_email.strip()):
+    # Field-format validation
+    if not _v.is_valid_name(customer_name):
+        return {"success": False, "error": "Please provide a valid name.",
+                "invalid_field": "name"}
+    if not _v.is_valid_email(customer_email):
         return {
             "success": False,
             "error": f"'{customer_email}' does not look like a valid email address.",
             "invalid_field": "email",
         }
+    if not _v.is_valid_phone(customer_phone):
+        return {
+            "success": False,
+            "error": "Please provide a valid 10-digit mobile number.",
+            "invalid_field": "phone",
+        }
+    ok_rooms, rooms_err = _v.validate_rooms(num_rooms)
+    if not ok_rooms:
+        return {"success": False, "error": rooms_err, "invalid_field": "num_rooms"}
 
     # === GOTRAM ELIGIBILITY CHECK ===
     from app.gotram import match_gotram
@@ -250,6 +269,11 @@ def create_booking(
         check_in = date.today()
     if not check_out:
         check_out = check_in + timedelta(days=1)
+
+    # Validate the stay date range
+    ok_stay, stay_err = _v.validate_stay(check_in, check_out)
+    if not ok_stay:
+        return {"success": False, "error": stay_err, "invalid_field": "dates"}
 
     # Check availability
     avail = check_availability(location, room_type, check_in, check_out, num_rooms)
@@ -316,7 +340,7 @@ def create_booking(
     # Store
     _bookings[booking_id] = booking
 
-    # Update availability
+    # Update in-memory availability
     current = check_in
     while current < check_out:
         bkey = (key, rt, current)
@@ -326,12 +350,44 @@ def create_booking(
     # Update/create customer profile
     _enrich_customer(customer_name, customer_phone, customer_age, location, booking_id)
 
-    # Firebase sync
+    # Firebase sync — prefer the CONCURRENCY-SAFE transactional path so voice /
+    # WhatsApp bookings contend on the same availability counters as walk-ins
+    # (prevents double-booking the last room). Falls back to a plain save.
     try:
-        from app.firebase_store import save_booking_to_firebase
-        save_booking_to_firebase(booking)
-    except Exception:
-        pass
+        from app.firebase_store import (
+            is_firebase_active, book_reservation_atomic, save_booking_to_firebase,
+        )
+        if is_firebase_active():
+            capacity = int(loc.get("total_rooms", 0) or 0)
+            atomic = book_reservation_atomic(booking, capacity)
+            if not atomic.get("success"):
+                if atomic.get("error") == "no_rooms":
+                    # Roll back the in-memory reservation we optimistically made.
+                    _bookings.pop(booking_id, None)
+                    cur = check_in
+                    while cur < check_out:
+                        bkey = (key, rt, cur)
+                        _booked[bkey] = max(0, _booked.get(bkey, 0) - num_rooms)
+                        cur += timedelta(days=1)
+                    return {
+                        "success": False,
+                        "error": (
+                            "Sorry, those rooms were just taken for "
+                            f"{atomic.get('unavailable_date')}. Please try other dates."
+                        ),
+                        "no_rooms": True,
+                    }
+                # Any other Firebase error: fall back to a plain save.
+                save_booking_to_firebase(booking)
+        else:
+            save_booking_to_firebase(booking)
+    except Exception as e:
+        logger.error(f"Firebase booking sync failed: {e}")
+        try:
+            from app.firebase_store import save_booking_to_firebase as _save
+            _save(booking)
+        except Exception:
+            pass
 
     # === SEND WHATSAPP CONFIRMATION ===
     whatsapp_sent = False
@@ -343,6 +399,20 @@ def create_booking(
             whatsapp_sent = result.get("success", False)
         except Exception as e:
             logger.error(f"WhatsApp send failed: {e}")
+
+    # === AUDIT ===
+    try:
+        from app.audit import log_event
+        log_event(
+            entity_type="reservation",
+            entity_id=booking_id,
+            action="create",
+            actor=customer_phone or "system",
+            source=booking.get("source", "voice_ai"),
+            new_state=booking,
+        )
+    except Exception:
+        pass
 
     return {
         "success": True,
@@ -380,12 +450,34 @@ def cancel_booking(booking_id: str) -> dict:
         _booked[bkey] = max(0, _booked.get(bkey, 0) - num_rooms)
         current += timedelta(days=1)
 
+    previous = dict(booking)
     booking["status"] = "cancelled"
     _bookings[booking_id] = booking
 
     try:
-        from app.firebase_store import update_booking_status_firebase
+        from app.firebase_store import (
+            update_booking_status_firebase, release_reservation_counters,
+        )
         update_booking_status_firebase(booking_id, "cancelled")
+        # Free the shared availability counters so the rooms become bookable.
+        release_reservation_counters(
+            booking["location"], booking["check_in"], booking["check_out"], num_rooms,
+        )
+    except Exception:
+        pass
+
+    # === AUDIT ===
+    try:
+        from app.audit import log_event
+        log_event(
+            entity_type="reservation",
+            entity_id=booking_id,
+            action="cancel",
+            actor=booking.get("customer_phone", "system"),
+            source=booking.get("source", "system"),
+            previous_state=previous,
+            new_state=booking,
+        )
     except Exception:
         pass
 

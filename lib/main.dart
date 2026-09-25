@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
 
 import 'views/auth_gate.dart';
@@ -28,6 +29,18 @@ Future<void> main() async {
             defaultValue: '1:421799101876:web:3a68c294773201238edee1'),
       ),
     ).timeout(const Duration(seconds: 10));
+
+    // Local caching: serve reads from an on-device cache, cutting repeat
+    // network reads and cloud cost. Bounded to 40 MB. Best-effort — must be set
+    // before the first Firestore use and never after.
+    try {
+      FirebaseFirestore.instance.settings = const Settings(
+        persistenceEnabled: true,
+        cacheSizeBytes: 40 * 1024 * 1024,
+      );
+    } catch (_) {
+      // Settings can only be applied once; ignore if already configured.
+    }
 
     runApp(const DashboardApp());
   } on TimeoutException {

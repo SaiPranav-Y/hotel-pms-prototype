@@ -46,6 +46,7 @@ from app.payments import (
 from app import roles as roles_mod
 from app import rates as rates_mod
 from app import checkout as checkout_mod
+from app import audit as audit_mod
 from app import invoice as invoice_mod
 from app import certificate_80g as cert_mod
 from app.pages.call_page import CALL_PAGE_HTML
@@ -539,6 +540,18 @@ def _guard(request: Request, permission: str):
 async def api_roles():
     """List roles and their permission sets."""
     return JSONResponse(content={"roles": roles_mod.get_all_roles()})
+
+
+@app.get("/api/audit")
+async def api_audit(request: Request, entity_id: str = "", limit: int = 100):
+    """
+    Recent audit-log entries (admin only). Optional ?entity_id= to filter to one
+    reservation. The append-only trail records who changed what and when.
+    """
+    denied = _guard(request, "view_analytics")
+    if denied:
+        return denied
+    return JSONResponse(content={"events": audit_mod.get_recent(limit=limit, entity_id=entity_id)})
 
 
 @app.post("/api/login")

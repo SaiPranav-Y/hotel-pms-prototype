@@ -4,6 +4,7 @@ import '../constants/karivena_data.dart';
 import '../models/reservation.dart';
 import '../models/temple.dart';
 import '../services/firestore_service.dart';
+import '../utils/validators.dart';
 
 /// Dialog mode — determines Add vs Edit behaviour.
 enum ReservationDialogMode { add, edit }
@@ -69,8 +70,6 @@ class _ReservationDialogState extends State<ReservationDialog> {
 
   int get _nightlyRate =>
       _selectedTempleName == null ? 0 : rateFor(_selectedTempleName!, _selectedRoomType);
-
-  static final RegExp _phoneRegex = RegExp(r'^\+?[\d\s\-]+$');
 
   static const _statusOptions = [
     'Waiting for Approval',
@@ -145,26 +144,11 @@ class _ReservationDialogState extends State<ReservationDialog> {
     super.dispose();
   }
 
-  String? _validateName(String? value) {
-    if (value == null || value.trim().isEmpty) return 'Customer name is required';
-    return null;
-  }
+  String? _validateName(String? value) => Validators.name(value);
 
-  String? _validatePhone(String? value) {
-    if (value == null || value.isEmpty) return 'Phone number is required';
-    if (!_phoneRegex.hasMatch(value)) {
-      return 'Only digits, spaces, hyphens, or leading + allowed';
-    }
-    return null;
-  }
+  String? _validatePhone(String? value) => Validators.phone(value);
 
-  String? _validateRooms(String? value) {
-    if (value == null || value.trim().isEmpty) return 'Required';
-    final parsed = int.tryParse(value.trim());
-    if (parsed == null || parsed < 1) return 'Must be at least 1';
-    if (parsed > 100) return 'Must be at most 100';
-    return null;
-  }
+  String? _validateRooms(String? value) => Validators.rooms(value);
 
   String? _validateGotram(String? value) {
     if (value == null || value.trim().isEmpty) {
@@ -219,8 +203,18 @@ class _ReservationDialogState extends State<ReservationDialog> {
       return;
     }
 
+    // Extra guard on the stay range (defence in depth beyond field validators).
+    final stayErr = Validators.stay(_checkIn, _checkOut);
+    if (stayErr != null) {
+      setState(() => _errorMessage = stayErr);
+      return;
+    }
+
     final noOfRooms = int.parse(_roomsController.text.trim());
     final age = int.tryParse(_ageController.text.trim()) ?? 0;
+    // Sanitize + normalise inputs before persisting.
+    final cleanName = Validators.sanitizeName(_nameController.text);
+    final cleanPhone = Validators.normalizePhone(_phoneController.text);
     // Normalise gotram to its canonical approved name
     final canonicalGotram = matchGotram(_gotramController.text) ?? _gotramController.text.trim();
 
@@ -232,8 +226,8 @@ class _ReservationDialogState extends State<ReservationDialog> {
     try {
       final reservation = Reservation(
         id: widget.existingReservation?.id ?? '',
-        customerName: _nameController.text.trim(),
-        customerPhone: _phoneController.text.trim(),
+        customerName: cleanName,
+        customerPhone: cleanPhone,
         customerAge: age,
         gotram: canonicalGotram,
         templeName: _selectedTempleName!,
@@ -252,17 +246,35 @@ class _ReservationDialogState extends State<ReservationDialog> {
       if (_isEditMode) {
         await _firestoreService.updateReservation(reservation.id, reservation);
       } else {
-        await _firestoreService.addReservation(reservation);
+        // Concurrency-safe create: atomically verifies availability + books,
+        // preventing double-booking of the last room across all channels.
+        final capacity = _capacityForSelectedTemple();
+        await _firestoreService.createReservationAudited(
+          reservation,
+          templeCapacity: capacity,
+          source: 'walk_in',
+        );
       }
 
       if (mounted) Navigator.pop(context);
+    } on RoomUnavailableException catch (e) {
+      setState(() => _errorMessage = e.message);
     } on FirestoreServiceException catch (e) {
       setState(() => _errorMessage = e.message);
     } catch (e) {
-      setState(() => _errorMessage = 'An unexpected error occurred.');
+      setState(() =>
+          _errorMessage = 'Could not save. Check your connection and try again.');
     } finally {
       if (mounted) setState(() => _isSubmitting = false);
     }
+  }
+
+  /// Total room capacity for the currently selected temple (0 if unknown).
+  int _capacityForSelectedTemple() {
+    for (final t in _temples) {
+      if (t.templeName == _selectedTempleName) return t.totalCapacity;
+    }
+    return 0;
   }
 
   String _formatDate(DateTime? date) {

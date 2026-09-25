@@ -81,6 +81,173 @@ def is_firebase_active() -> bool:
 # WRITE OPERATIONS
 # =============================================================================
 
+# =============================================================================
+# CONCURRENCY-SAFE BOOKING (shared availability counters)
+# -----------------------------------------------------------------------------
+# The Flutter PMS and this backend both book against per-(temple, date) counter
+# documents in the `availability` collection (id = "<templeKey>__<yyyy-MM-dd>").
+# A Firestore transaction reads every night's counter, verifies capacity, then
+# writes the reservation and bumps the counters atomically — so a walk-in and a
+# voice/WhatsApp booking cannot both take the last room.
+# =============================================================================
+
+def _temple_key(name: str) -> str:
+    import re
+    return re.sub(r"[\s_]+", "_", (name or "").strip().lower())
+
+
+def _availability_doc_id(temple_name: str, day: date) -> str:
+    return f"{_temple_key(temple_name)}__{day.isoformat()}"
+
+
+def _nights_of(check_in: date, check_out: date) -> list:
+    from datetime import timedelta
+    nights = []
+    cur = check_in
+    while cur < check_out:
+        nights.append(cur)
+        cur += timedelta(days=1)
+    if not nights:
+        nights.append(check_in)
+    return nights
+
+
+def book_reservation_atomic(booking: dict, temple_capacity: int) -> dict:
+    """
+    Atomically reserve rooms for every night of the stay against the shared
+    `availability` counters, then write the reservation to /reservations.
+
+    Returns {"success": bool, "reservation_id": str|None, "error": str|None,
+             "unavailable_date": str|None}.
+    Falls back to a plain save if Firebase is not active.
+    """
+    if not is_firebase_active():
+        return {"success": False, "error": "Firebase not active"}
+
+    try:
+        from firebase_admin import firestore as _fs
+
+        temple_name = booking.get("location") or booking.get("temple_name") or ""
+        rooms = int(booking.get("num_rooms", 1) or 1)
+        ci = booking.get("check_in")
+        co = booking.get("check_out")
+        check_in = date.fromisoformat(str(ci)[:10]) if ci else date.today()
+        from datetime import timedelta
+        check_out = date.fromisoformat(str(co)[:10]) if co else check_in + timedelta(days=1)
+        nights = _nights_of(check_in, check_out)
+
+        doc_data = _reservation_doc(booking)
+        res_id = booking.get("booking_id")
+
+        transaction = _db.transaction()
+        result = {"success": False}
+
+        @_fs.transactional
+        def _txn(txn):
+            counter_refs = [
+                _db.collection("availability").document(
+                    _availability_doc_id(temple_name, d))
+                for d in nights
+            ]
+            # READ all counters first
+            snaps = [ref.get(transaction=txn) for ref in counter_refs]
+            for i, snap in enumerate(snaps):
+                data = snap.to_dict() if snap.exists else {}
+                capacity = int(data.get("capacity", temple_capacity) or temple_capacity)
+                booked = int(data.get("booked", 0) or 0)
+                if booked + rooms > capacity:
+                    result["unavailable_date"] = nights[i].isoformat()
+                    result["available"] = max(capacity - booked, 0)
+                    raise _RoomUnavailable(nights[i].isoformat(), max(capacity - booked, 0))
+
+            # WRITE reservation
+            if res_id:
+                res_ref = _db.collection("reservations").document(res_id)
+            else:
+                res_ref = _db.collection("reservations").document()
+            txn.set(res_ref, doc_data)
+
+            # BUMP counters
+            for i, ref in enumerate(counter_refs):
+                data = snaps[i].to_dict() if snaps[i].exists else {}
+                txn.set(ref, {
+                    "temple_name": temple_name,
+                    "date": nights[i].isoformat(),
+                    "capacity": int(data.get("capacity", temple_capacity) or temple_capacity),
+                    "booked": _fs.Increment(rooms),
+                    "updated_at": datetime.now().isoformat(),
+                }, merge=True)
+
+            result["reservation_id"] = res_ref.id
+
+        try:
+            _txn(transaction)
+            result["success"] = True
+            logger.info(f"Atomic booking committed: {result.get('reservation_id')}")
+            return result
+        except _RoomUnavailable as e:
+            logger.info(f"Atomic booking rejected — no rooms on {e.day}")
+            return {"success": False, "error": "no_rooms",
+                    "unavailable_date": e.day, "available": e.available}
+    except Exception as e:
+        logger.error(f"Atomic booking error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+class _RoomUnavailable(Exception):
+    def __init__(self, day: str, available: int):
+        self.day = day
+        self.available = available
+        super().__init__(f"No rooms on {day}")
+
+
+def release_reservation_counters(temple_name: str, check_in, check_out, rooms: int) -> bool:
+    """Decrement the availability counters (call on cancel)."""
+    if not is_firebase_active():
+        return False
+    try:
+        from firebase_admin import firestore as _fs
+        from datetime import timedelta
+        ci = date.fromisoformat(str(check_in)[:10])
+        co = date.fromisoformat(str(check_out)[:10])
+        for d in _nights_of(ci, co):
+            ref = _db.collection("availability").document(
+                _availability_doc_id(temple_name, d))
+            snap = ref.get()
+            if snap.exists:
+                booked = int(snap.to_dict().get("booked", 0) or 0)
+                ref.update({"booked": max(booked - rooms, 0),
+                            "updated_at": datetime.now().isoformat()})
+        return True
+    except Exception as e:
+        logger.error(f"Counter release error: {e}")
+        return False
+
+
+def _reservation_doc(booking: dict) -> dict:
+    """Map a booking dict to the shared Firestore reservation schema."""
+    return {
+        "customer_name": booking.get("customer_name", ""),
+        "customer_phone": booking.get("customer_phone", ""),
+        "customer_email": booking.get("customer_email", ""),
+        "customer_age": int(booking.get("customer_age", 0) or 0),
+        "gotram": booking.get("gotram", ""),
+        "temple_name": booking.get("location", booking.get("temple", "")),
+        "room_type": booking.get("room_type_name", booking.get("room_type", "")),
+        "check_in": booking.get("check_in", ""),
+        "check_out": booking.get("check_out", ""),
+        "no_of_rooms": int(booking.get("num_rooms", 1)),
+        "total_price": int(booking.get("total_price", 0) or 0),
+        "payment_method": booking.get("payment_method", ""),
+        "reservation_status": "CONFIRMED",
+        "reservation_mode": booking.get("reservation_mode", "Voice Assistant"),
+        "payment_status": booking.get("payment_status", "pending"),
+        "payment_link": booking.get("payment_link", ""),
+        "donation_link": booking.get("donation_link", ""),
+        "created_at": datetime.now().isoformat(),
+    }
+
+
 def save_booking_to_firebase(booking: dict) -> bool:
     """
     Save a booking to Firestore /reservations collection.
