@@ -112,16 +112,25 @@ class EdgeTTS(TTSProvider):
 
     audio_ext = "mp3"
 
-    def __init__(self, voice: str | None = None):
+    def __init__(self, voice: str | None = None, rate: str | None = None,
+                 pitch: str | None = None):
         self.voice = voice or config.TTS_VOICE_TE
-        self.cache_tag = f"edge:{self.voice}"
+        # Prosody makes the voice sound more natural: a slightly slower rate and
+        # a touch lower pitch read warmer and clearer for Telugu than the default.
+        self.rate = rate if rate is not None else config.TTS_RATE
+        self.pitch = pitch if pitch is not None else config.TTS_PITCH
+        # Cache key includes prosody so changing rate/pitch re-synthesizes.
+        self.cache_tag = f"edge:{self.voice}:{self.rate}:{self.pitch}"
 
     def _synthesize_raw(self, text: str, out_path: Path) -> bool:
         import asyncio
         import edge_tts
 
         async def _run():
-            comm = edge_tts.Communicate(text, self.voice)
+            # edge-tts accepts rate="+/-N%" and pitch="+/-NHz" for prosody.
+            comm = edge_tts.Communicate(
+                text, self.voice, rate=self.rate, pitch=self.pitch
+            )
             await comm.save(str(out_path))
 
         # edge-tts is async; run it to completion synchronously.

@@ -18,6 +18,14 @@ run_voice.py  : mic → STT     → DialogueSession → TTS → speaker     (Pha
 run_call.py   : phone → STT   → DialogueSession → TTS → phone       (Phases 5-6)
 ```
 
+**New:** the agent can book against **two data sources** — a self-contained
+offline **SQLite** DB (default), or the **live Karivena PMS data** in the sibling
+`hotel-voice-booking-demo` project (same `knowledge_base` + Firestore the PMS
+uses). Switch with `DATA_SOURCE=sqlite|live`.
+
+- **Step-by-step setup:** see **[SETUP.md](SETUP.md)**
+- **How the two projects connect:** see **[docs/INTEGRATION.md](docs/INTEGRATION.md)**
+
 ---
 
 ## Why it's built this way
@@ -147,6 +155,35 @@ Asterisk, see **[docs/TELEPHONY.md](docs/TELEPHONY.md)**.
 
 ---
 
+## Live data integration (book into the Karivena PMS)
+
+By default the agent uses its own offline SQLite DB. Set `DATA_SOURCE=live` to
+book against the **same live data** as the `hotel-voice-booking-demo` PMS — its
+`knowledge_base`, admin rates, gotram eligibility, payment/WhatsApp side-effects,
+and (when Firebase is enabled in the demo) the shared Firestore the Flutter PMS
+uses.
+
+```powershell
+$env:DATA_SOURCE = "live"
+py run_text.py --no-llm
+```
+
+In live mode the agent additionally collects the caller's **phone, gotram, and
+email** (required by the PMS), all in Telugu, and the gotram must be in the
+approved community list. If the demo project can't be found, the agent falls
+back to SQLite automatically. Full details and the data-flow diagram are in
+**[docs/INTEGRATION.md](docs/INTEGRATION.md)**; setup is in **[SETUP.md](SETUP.md)**.
+
+## Natural Telugu voice
+
+Spoken output uses the natural Telugu neural voice `te-IN-ShrutiNeural` (female;
+`te-IN-MohanNeural` is the male alternate) via `edge-tts`, with light prosody
+tuning (`TTS_RATE=-6%`, `TTS_PITCH=-2Hz`) for a warmer, clearer read. Numbers,
+prices, and dates are converted to **Telugu words** before synthesis so they're
+spoken naturally rather than digit-by-digit.
+
+---
+
 ## Tests & evaluation
 
 ```powershell
@@ -185,7 +222,10 @@ All settings are environment variables (see `.env.example`). Key ones:
 | `TIMEZONE` | `Asia/Kolkata` | anchors "today"/"tomorrow" |
 | `ALLOW_CLOUD_TTS` | `false` | must be `true` for spoken (edge-tts) output |
 | `STT_MODEL` | `small` | faster-whisper size (`base`/`small` on CPU) |
-| `TTS_VOICE_TE` | `te-IN-ShrutiNeural` | edge-tts Telugu voice |
+| `TTS_VOICE_TE` | `te-IN-ShrutiNeural` | edge-tts Telugu voice (natural) |
+| `TTS_RATE` / `TTS_PITCH` | `-6%` / `-2Hz` | prosody for a warmer voice |
+| `DATA_SOURCE` | `sqlite` | `live` books into the Karivena PMS data |
+| `KARIVENA_DEMO_PATH` | (auto) | path to `hotel-voice-booking-demo` for live mode |
 
 ---
 
@@ -211,6 +251,7 @@ All settings are environment variables (see `.env.example`). Key ones:
 | 4 | Local mic/speaker loop | ✅ done (live audio is user-run) |
 | 5-6 | Telephony adapter seam + Asterisk templates | ✅ seam + mock + docs |
 | 7 | Hardening: eval, latency, concurrency | ✅ done |
+| + | Live PMS data integration (`DATA_SOURCE=live`) | ✅ done (see INTEGRATION.md) |
 
 ---
 

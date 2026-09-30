@@ -26,3 +26,8 @@ pytest==8.4.2
 # adapter is pure-Python. A real Asterisk/SIP channel is external (see
 # docs/TELEPHONY.md). An offline neural TTS (Piper/MMS) would add torch/onnx,
 # which are intentionally NOT pinned here (edge-tts is the working path).
+#
+# LIVE MODE (DATA_SOURCE=live): the agent imports the sibling
+# hotel-voice-booking-demo data layer. Install ITS dependencies too:
+#   py -m pip install -r ..\..\hotel-voice-booking-demo\requirements.txt
+# (adds firebase-admin, reportlab, razorpay, openpyxl, etc.). See SETUP.md.

@@ -66,9 +66,37 @@ STT_BEAM_SIZE = int(os.getenv("STT_BEAM_SIZE", "1"))  # 1 = greedy = fastest
 TTS_ENGINE = os.getenv("TTS_ENGINE", "edge")
 TTS_VOICE_TE = os.getenv("TTS_VOICE_TE", "te-IN-ShrutiNeural")
 TTS_CACHE_DIR = os.getenv("TTS_CACHE_DIR", str(_ROOT / ".tts_cache"))
+# Prosody for a more natural voice. edge-tts accepts +/-N% rate and +/-NHz pitch.
+# Slightly slower + a touch lower pitch reads warmer and clearer for Telugu.
+TTS_RATE = os.getenv("TTS_RATE", "-6%")
+TTS_PITCH = os.getenv("TTS_PITCH", "-2Hz")
+TTS_VOICE_TE_ALT = os.getenv("TTS_VOICE_TE_ALT", "te-IN-MohanNeural")  # male alt
 
 # --- Local mic/speaker loop (Phase 4) ---
 AUDIO_SAMPLE_RATE = int(os.getenv("AUDIO_SAMPLE_RATE", "16000"))  # whisper wants 16k
 AUDIO_SILENCE_RMS = float(os.getenv("AUDIO_SILENCE_RMS", "0.01"))  # below = silence
 AUDIO_SILENCE_SECS = float(os.getenv("AUDIO_SILENCE_SECS", "1.2"))  # end-of-turn hush
 AUDIO_MAX_TURN_SECS = float(os.getenv("AUDIO_MAX_TURN_SECS", "15"))  # hard cap per turn
+
+# --- Live data integration (with hotel-voice-booking-demo) ---
+# "sqlite" = self-contained offline DB (default). "live" = book against the
+# Karivena knowledge_base data layer (Firestore-synced) from the sibling
+# hotel-voice-booking-demo project, so bookings appear in the PMS too.
+DATA_SOURCE = os.getenv("DATA_SOURCE", "sqlite").lower()
+
+# Path to the sibling demo project (holds knowledge_base.py, vernacular.py, …).
+# Auto-discovers the sibling checkout; override with KARIVENA_DEMO_PATH.
+_DEMO_CANDIDATES = [
+    _ROOT.parent.parent / "hotel-voice-booking-demo",
+    _ROOT.parent / "hotel-voice-booking-demo",
+]
+KARIVENA_DEMO_PATH = os.getenv("KARIVENA_DEMO_PATH", "")
+if not KARIVENA_DEMO_PATH:
+    for c in _DEMO_CANDIDATES:
+        if (c / "app" / "knowledge_base.py").exists():
+            KARIVENA_DEMO_PATH = str(c)
+            break
+
+# Default gotram to use when a caller can't supply one (live mode requires a
+# gotram in the approved list). Empty = always ask the caller.
+DEFAULT_GOTRAM = os.getenv("DEFAULT_GOTRAM", "")

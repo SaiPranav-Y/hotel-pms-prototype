@@ -18,11 +18,11 @@ REPL, and later the voice loop, just feed text in and speak text out.
 import logging
 from datetime import date
 
+from app import config
 from app.dialogue import templates_te as T
 from app.dialogue import slots as S
 from app.nlp_te import normalize as nz
-from app.tools import availability as av
-from app.tools import booking as bk
+from app.tools.datasource import get_data_source
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +35,9 @@ ASK_NIGHTS = "ASK_NIGHTS"
 ASK_GUESTS = "ASK_GUESTS"
 ASK_ROOM_TYPE = "ASK_ROOM_TYPE"
 ASK_NAME = "ASK_NAME"
+ASK_PHONE = "ASK_PHONE"
+ASK_GOTRAM = "ASK_GOTRAM"
+ASK_EMAIL = "ASK_EMAIL"
 CONFIRM = "CONFIRM"
 CANCEL_ASK_ID = "CANCEL_ASK_ID"
 CANCEL_CONFIRM = "CANCEL_CONFIRM"
@@ -58,12 +61,22 @@ def _is_no(text: str) -> bool:
 class DialogueSession:
     """One caller conversation. `caller_id` is used as the default phone."""
 
-    def __init__(self, llm=None, caller_id: str = "", locations: list[str] | None = None):
+    def __init__(self, llm=None, caller_id: str = "", locations: list[str] | None = None,
+                 data_source=None):
         self.llm = llm
         self.caller_id = caller_id
         self.locations = locations or []
+        # The data source decides where bookings go (offline SQLite or the live
+        # Karivena knowledge_base) and which extra slots are mandatory.
+        self.ds = data_source if data_source is not None else get_data_source()
+        self.extra_required = tuple(getattr(self.ds, "extra_required", ()))
         self.state = GREETING
-        self.slots = S.BookingSlots(callback_number=caller_id or None)
+        # Don't pre-fill phone from caller_id in live mode — we confirm it by
+        # asking, since it becomes the booking's contact number.
+        prefill = caller_id or None
+        if "phone" in self.extra_required:
+            prefill = None
+        self.slots = S.BookingSlots(callback_number=prefill)
         self.fails = 0            # consecutive failures on the current slot
         self.pending_cancel_id = None
 
@@ -111,6 +124,12 @@ class DialogueSession:
             return self._collect_room_type(text)
         if st == ASK_NAME:
             return self._collect_name(text)
+        if st == ASK_PHONE:
+            return self._collect_phone(text)
+        if st == ASK_GOTRAM:
+            return self._collect_gotram(text)
+        if st == ASK_EMAIL:
+            return self._collect_email(text)
         if st == CONFIRM:
             return self._on_confirm(text)
         if st == CANCEL_ASK_ID:
@@ -155,12 +174,24 @@ class DialogueSession:
 
     # ---- slot collection (deterministic) ----
     def _collect_location(self, text: str) -> str:
-        loc = S.normalize_location(text, self.locations)
+        loc = self._normalize_location(text)
         if not loc:
             return self._retry(T.ASK_LOCATION)
         self.slots.location = loc
         self.fails = 0
         return self._advance_booking()
+
+    def _normalize_location(self, text: str) -> str | None:
+        """Resolve a location via the data source (demo vernacular in live mode),
+        falling back to the local slot matcher against known locations."""
+        loc = None
+        try:
+            loc = self.ds.normalize_location(text)
+        except Exception:
+            loc = None
+        if not loc:
+            loc = S.normalize_location(text, self.locations)
+        return loc
 
     def _collect_checkin(self, text: str) -> str:
         d = nz.parse_relative_date(text)
@@ -202,10 +233,34 @@ class DialogueSession:
         self.fails = 0
         return self._advance_booking()
 
+    def _collect_phone(self, text: str) -> str:
+        phone = nz.parse_phone(text)
+        if not phone:
+            return self._retry(T.ASK_PHONE)
+        self.slots.callback_number = phone
+        self.fails = 0
+        return self._advance_booking()
+
+    def _collect_gotram(self, text: str) -> str:
+        g = nz.nfc(text).strip()
+        if len(g) < 2:
+            return self._retry(T.ASK_GOTRAM)
+        self.slots.gotram = g
+        self.fails = 0
+        return self._advance_booking()
+
+    def _collect_email(self, text: str) -> str:
+        email = nz.parse_email(text)
+        if not email:
+            return self._retry(T.ASK_EMAIL)
+        self.slots.email = email
+        self.fails = 0
+        return self._advance_booking()
+
     # ---- booking progression ----
     def _advance_booking(self) -> str:
         """Ask for the next missing slot, else check availability + confirm."""
-        need = self.slots.missing_for_booking()
+        need = self.slots.missing_for_booking(self.extra_required)
         if "location" in need:
             self.state = ASK_LOCATION
             return self._speak(T.ASK_LOCATION)
@@ -224,16 +279,26 @@ class DialogueSession:
         if "guest_name" in need:
             self.state = ASK_NAME
             return self._speak(T.ASK_NAME)
+        # Live-mode extra slots (phone, gotram, email).
+        if "phone" in need:
+            self.state = ASK_PHONE
+            return self._speak(T.ASK_PHONE)
+        if "gotram" in need:
+            self.state = ASK_GOTRAM
+            return self._speak(T.ASK_GOTRAM)
+        if "email" in need:
+            self.state = ASK_EMAIL
+            return self._speak(T.ASK_EMAIL)
         return self._check_and_confirm()
 
     def _check_and_confirm(self) -> str:
         ci = self.slots.check_in_date
         co = self.slots.resolved_checkout()
-        offers = av.check_availability(
-            self.slots.location, ci, co, self.slots.num_guests, self.slots.room_type
+        avail = self.ds.check_availability(
+            location=self.slots.location, room_type=self.slots.room_type,
+            check_in=ci, check_out=co, num_rooms=1, guests=self.slots.num_guests or 1,
         )
-        offer = next((o for o in offers if o.room_type == self.slots.room_type), None)
-        if not offer:
+        if not avail.available:
             # nothing available → reset dates for a fresh try
             self.slots.check_in_date = None
             self.slots.nights = None
@@ -241,7 +306,7 @@ class DialogueSession:
             return self._speak(T.NOT_AVAILABLE)
 
         nights = (co - ci).days
-        total = offer.price_per_night * nights * 1
+        total = avail.total_price or (avail.price_per_night * nights)
         self._quote_total = total
         self.state = CONFIRM
         return self._speak(T.confirm_summary(
@@ -255,7 +320,7 @@ class DialogueSession:
 
     def _on_confirm(self, text: str) -> str:
         if _is_yes(text):
-            res = bk.create_booking(
+            res = self.ds.create_booking(
                 location=self.slots.location,
                 room_type=self.slots.room_type,
                 guest_name=self.slots.guest_name,
@@ -264,12 +329,24 @@ class DialogueSession:
                 check_out=self.slots.resolved_checkout(),
                 guests=self.slots.num_guests or 1,
                 num_rooms=1,
+                gotram=self.slots.gotram or config.DEFAULT_GOTRAM,
+                email=self.slots.email or "",
             )
-            self.state = DONE
             if not res.success:
                 if res.error == "no_rooms":
+                    self.state = DONE
                     return self._speak(T.NOT_AVAILABLE)
+                if res.error == "gotram_rejected":
+                    # Let the caller re-state the gotram rather than ending.
+                    self.slots.gotram = None
+                    self.state = ASK_GOTRAM
+                    return self._speak(T.GOTRAM_REJECTED)
+                self.state = DONE
                 return self._speak(T.NOT_UNDERSTOOD)
+            self.state = DONE
+            # Live ids are alphanumeric (BK-XXXX); SQLite ids are 4 digits.
+            if "phone" in self.extra_required or (res.booking_id and not str(res.booking_id).isdigit()):
+                return self._speak(T.booking_done_live(res.booking_id))
             id_words = nz.digits_to_telugu_grouped(res.booking_id, group=4)
             return self._speak(T.booking_done(id_words))
         if _is_no(text):
@@ -282,9 +359,16 @@ class DialogueSession:
 
     # ---- cancellation ----
     def _collect_cancel_id(self, text: str) -> str:
-        n = nz.parse_number(text)
-        bid = str(n) if n else "".join(ch for ch in text if ch.isdigit())
-        b = bk.get_booking(booking_id=bid) if bid else None
+        # Live ids look like "BK-68CD5856"; SQLite ids are 4 digits. Accept both:
+        # keep an uppercased alphanumeric token if it looks like a live id, else
+        # fall back to the digits the caller gave.
+        raw = nz.nfc(text).strip().upper().replace(" ", "")
+        if raw.startswith("BK") or any(c.isalpha() for c in raw):
+            bid = raw if raw.startswith("BK-") else (f"BK-{raw[2:]}" if raw.startswith("BK") else raw)
+        else:
+            n = nz.parse_number(text)
+            bid = str(n) if n else "".join(ch for ch in text if ch.isdigit())
+        b = self.ds.get_booking(booking_id=bid) if bid else None
         if not b:
             return self._retry(T.CANCEL_NOT_FOUND, prompt=T.ASK_BOOKING_NUMBER)
         self.pending_cancel_id = bid
@@ -293,12 +377,12 @@ class DialogueSession:
 
     def _on_cancel_confirm(self, text: str) -> str:
         if _is_yes(text):
-            ok = bk.cancel_booking(self.pending_cancel_id,
-                                   phone=self.caller_id or "")
+            ok = self.ds.cancel_booking(self.pending_cancel_id,
+                                        phone=self.caller_id or "")
             # If caller-id doesn't match, retry without the phone guard is unsafe;
             # for the demo we cancel by id when confirmed.
             if not ok:
-                ok = bk.cancel_booking(self.pending_cancel_id)
+                ok = self.ds.cancel_booking(self.pending_cancel_id)
             self.state = DONE
             return self._speak(T.CANCELLED if ok else T.CANCEL_NOT_FOUND)
         if _is_no(text):
@@ -309,7 +393,7 @@ class DialogueSession:
     # ---- helpers ----
     def _extract_into_slots(self, text: str):
         """Best-effort deterministic extraction from a free opening sentence."""
-        loc = S.normalize_location(text, self.locations)
+        loc = self._normalize_location(text)
         if loc:
             self.slots.location = loc
         rt = S.normalize_room_type(text)

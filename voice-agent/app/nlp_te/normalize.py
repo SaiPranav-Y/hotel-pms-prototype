@@ -240,3 +240,73 @@ def parse_nights(text: str) -> int | None:
         if n:
             return n
     return parse_number(t)  # fall back to any bare number
+
+
+# ── Contact parsing (phone + email) — used in live-booking mode ────────────
+# Telugu digit-word -> digit, so a spoken "తొమ్మిది ఎనిమిది ఏడు …" phone works.
+_TE_DIGIT_WORD = {
+    "సున్నా": "0", "సున్న": "0", "జీరో": "0", "zero": "0",
+    "ఒకటి": "1", "ఒక": "1", "one": "1",
+    "రెండు": "2", "two": "2",
+    "మూడు": "3", "three": "3",
+    "నాలుగు": "4", "four": "4",
+    "ఐదు": "5", "అయిదు": "5", "five": "5",
+    "ఆరు": "6", "six": "6",
+    "ఏడు": "7", "seven": "7",
+    "ఎనిమిది": "8", "eight": "8",
+    "తొమ్మిది": "9", "nine": "9",
+}
+
+
+def parse_phone(text: str) -> str | None:
+    """
+    Extract a 10-digit Indian mobile number from text. Accepts plain digits
+    (with spaces/dashes), a +91 / 0 prefix, or Telugu/English digit words.
+    Returns the 10-digit string, or None if fewer than 10 digits found.
+    """
+    if not text:
+        return None
+    t = nfc(text).lower()
+    # First try raw digits.
+    digits = re.sub(r"\D", "", t)
+    # Drop a country code / trunk prefix if present.
+    if len(digits) > 10 and digits.startswith("91"):
+        digits = digits[-10:]
+    if len(digits) == 11 and digits.startswith("0"):
+        digits = digits[1:]
+    if len(digits) >= 10:
+        tail = digits[-10:]
+        if tail[0] in "6789":  # valid Indian mobile leading digit
+            return tail
+        return tail
+    # Fall back to digit-words (spoken numbers).
+    spoken = []
+    for tok in re.split(r"[\s,;]+", t):
+        if tok in _TE_DIGIT_WORD:
+            spoken.append(_TE_DIGIT_WORD[tok])
+    joined = "".join(spoken)
+    if len(joined) >= 10:
+        return joined[-10:]
+    return None
+
+
+def parse_email(text: str) -> str | None:
+    """
+    Extract an email address. Handles a literal address, or a spoken form using
+    'at'/'యాట్' for @ and 'dot'/'డాట్' for '.'  e.g.
+    'ravi at gmail dot com' -> 'ravi@gmail.com'.
+    """
+    if not text:
+        return None
+    t = nfc(text).strip()
+    # Literal email already present?
+    m = re.search(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}", t)
+    if m:
+        return m.group(0).lower()
+    # Spoken form: replace at/dot words, strip spaces.
+    lowered = t.lower()
+    lowered = re.sub(r"\s*(?:@|\bat\b|యాట్|ఎట్)\s*", "@", lowered)
+    lowered = re.sub(r"\s*(?:\bdot\b|డాట్|డాట)\s*", ".", lowered)
+    lowered = lowered.replace(" ", "")
+    m = re.search(r"[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}", lowered)
+    return m.group(0) if m else None

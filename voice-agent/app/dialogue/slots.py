@@ -77,9 +77,18 @@ class BookingSlots:
     location: str | None = None
     guest_name: str | None = None
     callback_number: str | None = None
+    # Live-booking-only fields (Karivena knowledge_base requires these).
+    gotram: str | None = None
+    email: str | None = None
 
-    def missing_for_booking(self) -> list[str]:
-        """Which mandatory slots are still empty (in ask order)."""
+    def missing_for_booking(self, extra_required: tuple[str, ...] = ()) -> list[str]:
+        """
+        Which mandatory slots are still empty, in ask order.
+
+        `extra_required` names additional fields the active data source needs
+        (the live Karivena backend requires phone + gotram + email). Passing an
+        empty tuple keeps the offline SQLite flow exactly as before.
+        """
         need = []
         if not self.location:
             need.append("location")
@@ -93,6 +102,13 @@ class BookingSlots:
             need.append("room_type")
         if not self.guest_name:
             need.append("guest_name")
+        # Extra live-mode slots, asked after the core ones.
+        if "phone" in extra_required and not self.callback_number:
+            need.append("phone")
+        if "gotram" in extra_required and not self.gotram:
+            need.append("gotram")
+        if "email" in extra_required and not self.email:
+            need.append("email")
         return need
 
     def resolved_checkout(self) -> date | None:
