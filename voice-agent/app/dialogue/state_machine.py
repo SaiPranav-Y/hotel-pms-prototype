@@ -62,7 +62,7 @@ class DialogueSession:
     """One caller conversation. `caller_id` is used as the default phone."""
 
     def __init__(self, llm=None, caller_id: str = "", locations: list[str] | None = None,
-                 data_source=None):
+                 data_source=None, prefill_phone: bool = False):
         self.llm = llm
         self.caller_id = caller_id
         self.locations = locations or []
@@ -71,10 +71,13 @@ class DialogueSession:
         self.ds = data_source if data_source is not None else get_data_source()
         self.extra_required = tuple(getattr(self.ds, "extra_required", ()))
         self.state = GREETING
-        # Don't pre-fill phone from caller_id in live mode — we confirm it by
-        # asking, since it becomes the booking's contact number.
+        # Phone handling differs by channel:
+        #  - Voice (phone call): we still confirm the number by asking, so leave
+        #    it empty in live mode (prefill_phone=False, the default).
+        #  - WhatsApp: the sender's number IS their contact, so pre-fill it and
+        #    skip the phone question (prefill_phone=True).
         prefill = caller_id or None
-        if "phone" in self.extra_required:
+        if "phone" in self.extra_required and not prefill_phone:
             prefill = None
         self.slots = S.BookingSlots(callback_number=prefill)
         self.fails = 0            # consecutive failures on the current slot

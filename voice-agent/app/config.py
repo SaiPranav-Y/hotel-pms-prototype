@@ -100,3 +100,17 @@ if not KARIVENA_DEMO_PATH:
 # Default gotram to use when a caller can't supply one (live mode requires a
 # gotram in the approved list). Empty = always ask the caller.
 DEFAULT_GOTRAM = os.getenv("DEFAULT_GOTRAM", "")
+
+# --- WhatsApp text channel (Telugu, same dialogue as voice) ---
+# Server bind for the webhook (run_whatsapp.py).
+WHATSAPP_HOST = os.getenv("WHATSAPP_HOST", "0.0.0.0")
+WHATSAPP_PORT = int(os.getenv("WHATSAPP_PORT", "8100"))
+# Idle conversation timeout (seconds) before a WhatsApp session is dropped.
+WA_SESSION_TTL_SECS = int(os.getenv("WA_SESSION_TTL_SECS", "1800"))
+# Outbound send provider. With none set, replies are logged (MOCK) — good for
+# local testing. Meta Cloud API: set token + phone id. Generic bot: set URL.
+WHATSAPP_TOKEN = os.getenv("WHATSAPP_TOKEN", "")
+WHATSAPP_PHONE_ID = os.getenv("WHATSAPP_PHONE_ID", "")
+WHATSAPP_WEBHOOK_URL = os.getenv("WHATSAPP_WEBHOOK_URL", "")
+# Token Meta uses to verify the webhook (GET /webhook hub.verify_token).
+WHATSAPP_VERIFY_TOKEN = os.getenv("WHATSAPP_VERIFY_TOKEN", "karivena-verify")
