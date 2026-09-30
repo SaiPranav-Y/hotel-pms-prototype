@@ -150,6 +150,16 @@ _TE_WEEKDAYS = {
     "సోమవారం": 0, "మంగళవారం": 1, "బుధవారం": 2, "గురువారం": 3,
     "శుక్రవారం": 4, "శనివారం": 5, "ఆదివారం": 6,
 }
+# weekday name (English) -> Python weekday()
+_EN_WEEKDAYS = {
+    "monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
+    "friday": 4, "saturday": 5, "sunday": 6,
+}
+# English month tokens (index+1 = month number); short forms included.
+_EN_MONTHS = [
+    "january", "february", "march", "april", "may", "june",
+    "july", "august", "september", "october", "november", "december",
+]
 
 
 def date_to_telugu(d: date) -> str:
@@ -194,7 +204,7 @@ def parse_relative_date(text: str, base: date | None = None) -> date | None:
         except ValueError:
             pass
 
-    # relative keywords
+    # relative keywords — Telugu
     if "ఎల్లుండి" in t:
         return base + timedelta(days=2)
     if "రేపు" in t:
@@ -202,7 +212,15 @@ def parse_relative_date(text: str, base: date | None = None) -> date | None:
     if "ఈరోజు" in t or "నేడు" in t or "ఇవాళ" in t:
         return base
 
-    # "వచ్చే <weekday>" / "ఈ <weekday>" / bare weekday -> next occurrence
+    # relative keywords — English
+    if "day after tomorrow" in t:
+        return base + timedelta(days=2)
+    if "tomorrow" in t:
+        return base + timedelta(days=1)
+    if "today" in t or "tonight" in t:
+        return base
+
+    # "వచ్చే <weekday>" / "ఈ <weekday>" / bare weekday -> next occurrence (Telugu)
     for name, wd in _TE_WEEKDAYS.items():
         if name in t:
             ahead = (wd - base.weekday()) % 7
@@ -210,6 +228,14 @@ def parse_relative_date(text: str, base: date | None = None) -> date | None:
                 ahead = 7  # always a future day
             if "వచ్చే" in t and ahead <= 0:
                 ahead += 7
+            return base + timedelta(days=ahead)
+
+    # English weekday names -> next occurrence
+    for name, wd in _EN_WEEKDAYS.items():
+        if re.search(rf"\b{name}\b", t):
+            ahead = (wd - base.weekday()) % 7
+            if ahead == 0:
+                ahead = 7
             return base + timedelta(days=ahead)
 
     # "<day> <telugu-month>"  e.g. "పన్నెండు అక్టోబర్" or "12 అక్టోబర్"
@@ -225,6 +251,22 @@ def parse_relative_date(text: str, base: date | None = None) -> date | None:
                     return cand
                 except ValueError:
                     pass
+
+    # "<day> <english-month>" e.g. "12 october" / "october 12" / "12th oct"
+    for i, mon in enumerate(_EN_MONTHS, start=1):
+        if mon in t:
+            m2 = re.search(r"\b(\d{1,2})\b", t)
+            if m2:
+                day = int(m2.group(1))
+                if 1 <= day <= 31:
+                    yr = base.year
+                    try:
+                        cand = date(yr, i, day)
+                        if cand < base:
+                            cand = date(yr + 1, i, day)
+                        return cand
+                    except ValueError:
+                        pass
     return None
 
 

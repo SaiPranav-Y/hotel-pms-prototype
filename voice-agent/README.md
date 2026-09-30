@@ -18,10 +18,11 @@ run_voice.py  : mic → STT     → DialogueSession → TTS → speaker     (Pha
 run_call.py   : phone → STT   → DialogueSession → TTS → phone       (Phases 5-6)
 ```
 
-There are three ways to talk to the **same** Telugu booking agent: text, voice,
-and **WhatsApp** — all sharing one dialogue core (same greeting, gotram, email,
-etc.). It can book against a local practice database or the **live Karivena PMS
-data** (`DATA_SOURCE=sqlite|live`).
+There are three ways to talk to the **same** booking agent: text, voice, and
+**WhatsApp** — all sharing one dialogue core (same greeting, gotram, email,
+etc.). The guest **chooses English or Telugu** at the start and the whole flow
+runs in that language. It can book against a local practice database or the
+**live Karivena PMS data** (`DATA_SOURCE=sqlite|live`).
 
 > **New to this? Start here:** double-click **`start_here.bat`** (or run
 > `py start_here.py`) for a guided menu, and read the plain-language
@@ -115,19 +116,25 @@ $env:PYTHONIOENCODING = "utf-8"
 ## Phase 1 — Text mode
 
 ```powershell
-py run_text.py            # with Ollama intent classification
+py run_text.py            # asks English or Telugu, then chats (Ollama intent)
 py run_text.py --no-llm   # deterministic only (no Ollama needed)
+py run_text.py --en       # skip the picker, use English
+py run_text.py --te       # skip the picker, use Telugu
 ```
 
-Type in Telugu. Example booking turns:
+By default the agent first asks the language (reply `1` English / `2` Telugu),
+then proceeds. Example Telugu booking turns:
 
 ```
 బుక్ చేయాలి → శ్రీశైలం → రేపు → రెండు రోజులు → ఇద్దరు → ఏసీ → రవి కుమార్ → అవును
 ```
 
-One question per turn; the agent reads back a confirmation summary and, on
-`అవును`, returns a spoken booking number (digits spelled out in Telugu). Say
-`మనిషితో మాట్లాడాలి` to transfer to a human. `exit` / `q` quits.
+The same flow in English: `Srisailam → tomorrow → 2 nights → 2 → AC →
+Ravi Kumar → yes`. One question per turn; the agent reads back a confirmation
+summary and returns a booking number. Say `human` / `మనిషితో మాట్లాడాలి` to
+transfer to a human. `exit` / `q` quits.
+
+The language mode is set by `LANG_MODE` (`ask` default, or `en` / `te`).
 
 ## Phases 2-4 — Local voice (mic + speaker)
 
@@ -248,6 +255,7 @@ All settings are environment variables (see `.env.example`). Key ones:
 | `OLLAMA_MODEL` | `llama3.2` | intent classification only |
 | `VOICE_AGENT_DB` | `voice_agent.db` | SQLite path |
 | `HOTEL_NAME` | `Karivena Satram` | used in the greeting |
+| `LANG_MODE` | `ask` | `ask` lets the guest pick; `en` / `te` force a language |
 | `TIMEZONE` | `Asia/Kolkata` | anchors "today"/"tomorrow" |
 | `ALLOW_CLOUD_TTS` | `false` | must be `true` for spoken (edge-tts) output |
 | `STT_MODEL` | `small` | faster-whisper size (`base`/`small` on CPU) |

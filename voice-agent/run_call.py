@@ -27,9 +27,11 @@ logging.basicConfig(level=logging.WARNING)
 log = logging.getLogger("run_call")
 
 
-def handle_call(adapter: TelephonyAdapter, call, locations, llm=None, tts=None):
+def handle_call(adapter: TelephonyAdapter, call, locations, llm=None, tts=None,
+                lang: str = "te"):
     """Run one full call through the shared dialogue core. Returns the transcript."""
-    session = DialogueSession(llm=llm, caller_id=call.caller_id, locations=locations)
+    session = DialogueSession(llm=llm, caller_id=call.caller_id,
+                              locations=locations, lang=lang)
     transcript: list[tuple[str, str]] = []
 
     def say(text: str):

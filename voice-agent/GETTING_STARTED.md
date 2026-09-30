@@ -7,15 +7,21 @@ command once, you can run this.
 
 ## What is this?
 
-A booking assistant for **Karivena Satram** that talks to guests **in Telugu**.
-It helps them check rooms, book, and cancel. You can use it three ways:
+A booking assistant for **Karivena Satram** that talks to guests in **English or
+Telugu** — the guest chooses. It helps them check rooms, book, and cancel. You
+can use it three ways:
 
-1. **Text chat** — type in Telugu on your screen. (Easiest to try.)
-2. **Voice** — speak into your microphone; it speaks back in Telugu.
-3. **WhatsApp** — guests message on WhatsApp and the agent replies in Telugu.
+1. **Text chat** — type on your screen. (Easiest to try.)
+2. **Voice** — speak into your microphone; it speaks back.
+3. **WhatsApp** — guests message on WhatsApp and the agent replies.
 
-All three ask the same friendly questions — a greeting, then location, dates,
-number of guests, room type, name, and (for real bookings) gotram and email.
+When a conversation starts, the agent asks which language you'd like — **press
+1 for English or 2 for Telugu** — and then everything (greeting, questions,
+gotram, confirmation) continues in that language.
+
+All three channels ask the same friendly questions — a greeting, then location,
+dates, number of guests, room type, name, and (for real bookings) gotram and
+email.
 
 ---
 
@@ -63,11 +69,24 @@ Type a number and press Enter. That's it.
 ## How to use each option
 
 ### 1) Text chat
-Type in Telugu. A full booking looks like this (type one line, press Enter,
-read the reply, type the next):
+First the agent asks your language — reply `1` for English or `2` for Telugu.
+Then answer one line at a time (type, press Enter, read the reply, type the next).
 
+**In English:**
 ```
-బుక్ చేయాలి        (I want to book)
+1                  (choose English)
+Srisailam          (which place)
+tomorrow           (when)
+2 nights           (how many nights)
+2                  (how many guests)
+AC                 (AC or Non-AC)
+Ravi Kumar         (your name)
+yes                (confirm)
+```
+
+**In Telugu:**
+```
+2                  (choose Telugu)
 శ్రీశైలం            (which place)
 రేపు               (when — tomorrow)
 రెండు రోజులు        (how many nights — two)
@@ -77,7 +96,9 @@ read the reply, type the next):
 అవును             (yes, confirm)
 ```
 
-The agent replies in Telugu and gives you a booking number. Type `exit` to stop.
+The agent replies in your chosen language and gives you a booking number. Type
+`exit` to stop. Tip: you can also skip the language question with
+`py run_text.py --en` or `py run_text.py --te`.
 
 ### 2) Voice call
 Speak the same answers into your microphone; the agent speaks back in Telugu.
@@ -85,10 +106,12 @@ Voice output needs an internet connection (it uses a free Microsoft Telugu
 voice). If you don't have a microphone, it quietly switches to typing.
 
 ### 3) WhatsApp server
-This starts a small web service that answers WhatsApp messages. By default it's
-in **safe test mode** (it logs replies instead of sending real WhatsApp
-messages), so you can try it without any WhatsApp account. To connect a real
-WhatsApp number, see "Going live on WhatsApp" below.
+This starts a small web service that answers WhatsApp messages. When a guest
+first messages, the agent asks their language (1 English / 2 Telugu) and then
+continues in that language. By default it's in **safe test mode** (it logs
+replies instead of sending real WhatsApp messages), so you can try it without
+any WhatsApp account. To connect a real WhatsApp number, see "Going live on
+WhatsApp" below.
 
 ---
 

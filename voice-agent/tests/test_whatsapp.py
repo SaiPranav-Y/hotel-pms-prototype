@@ -49,7 +49,9 @@ class TestMockSend:
 # ── Channel conversation (SQLite) ──────────────────────────────────────────
 class TestChannelSqlite:
     def _channel(self):
-        return WhatsAppChannel(data_source=SqliteDataSource())
+        # Force Telugu so these tests exercise the booking flow directly
+        # (the bilingual picker is covered separately in test_language.py).
+        return WhatsAppChannel(data_source=SqliteDataSource(), lang="te")
 
     def test_greeting_is_telugu(self, seeded_db):
         ch = self._channel()
@@ -145,7 +147,7 @@ def _live_available() -> bool:
                     reason="hotel-voice-booking-demo not importable")
 def test_live_channel_collects_gotram_email():
     from app.tools.datasource import LiveDataSource
-    ch = WhatsAppChannel(data_source=LiveDataSource())
+    ch = WhatsAppChannel(data_source=LiveDataSource(), lang="te")
     phone = "+919876590001"
     ch.handle_incoming(phone, "namaste")
     last = None

@@ -6,8 +6,11 @@ Type Telugu (or code-mixed) input; the agent replies in Telugu. This is the
 "fast iteration" mode from the steering file (§10) — no audio, no telephony.
 
 Run:
-    python run_text.py                 # uses Ollama for intent classification
+    python run_text.py                 # asks English or Telugu, then chats
     python run_text.py --no-llm        # deterministic only (no Ollama needed)
+    python run_text.py --en            # force English
+    python run_text.py --te            # force Telugu
+    python run_text.py --lang ask|en|te
 
 Prereqs: `python -m app.db.seed` runs automatically on first launch.
 """
@@ -39,13 +42,27 @@ from app.dialogue.state_machine import DialogueSession
 logging.basicConfig(level=logging.WARNING)
 
 
+def _lang_from_argv() -> str:
+    argv = sys.argv
+    if "--en" in argv:
+        return "en"
+    if "--te" in argv:
+        return "te"
+    if "--lang" in argv:
+        i = argv.index("--lang")
+        if i + 1 < len(argv) and argv[i + 1] in ("ask", "en", "te"):
+            return argv[i + 1]
+    return config.LANG  # default (ask)
+
+
 def main():
     use_llm = "--no-llm" not in sys.argv
     caller_id = "+919876543210"  # simulated caller number for the demo
+    lang = _lang_from_argv()
 
     print("=" * 60)
-    print(f"  {config.HOTEL_NAME} — Telugu Voice Agent (Text Mode)")
-    print("  Type in Telugu. Type 'exit' / 'q' to quit.")
+    print(f"  {config.HOTEL_NAME} — Booking Agent (Text Mode)")
+    print("  Type 'exit' / 'q' to quit.")
     print("=" * 60)
 
     # Seed DB (idempotent) + list locations for slot matching.
@@ -64,9 +81,10 @@ def main():
             print(f"[warn] Ollama unavailable ({e}); running deterministic-only.")
             llm = None
 
-    session = DialogueSession(llm=llm, caller_id=caller_id, locations=locations)
+    session = DialogueSession(llm=llm, caller_id=caller_id, locations=locations,
+                              lang=lang)
 
-    # Agent speaks first.
+    # Agent speaks first (the bilingual language picker if lang == "ask").
     print(f"\nAgent: {session.greeting()}")
 
     while not session.finished:

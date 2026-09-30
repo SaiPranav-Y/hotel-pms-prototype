@@ -19,14 +19,19 @@ import logging
 from datetime import date
 
 from app import config
-from app.dialogue import templates_te as T
+from app.dialogue import templates_te as _T_TE
+from app.dialogue import templates_en as _T_EN
+from app.dialogue import templates_common as C
 from app.dialogue import slots as S
 from app.nlp_te import normalize as nz
 from app.tools.datasource import get_data_source
 
 logger = logging.getLogger(__name__)
 
+_TEMPLATES = {"te": _T_TE, "en": _T_EN}
+
 # States
+ASK_LANGUAGE = "ASK_LANGUAGE"
 GREETING = "GREETING"
 INTENT = "INTENT"
 ASK_LOCATION = "ASK_LOCATION"
@@ -62,7 +67,7 @@ class DialogueSession:
     """One caller conversation. `caller_id` is used as the default phone."""
 
     def __init__(self, llm=None, caller_id: str = "", locations: list[str] | None = None,
-                 data_source=None, prefill_phone: bool = False):
+                 data_source=None, prefill_phone: bool = False, lang: str = "te"):
         self.llm = llm
         self.caller_id = caller_id
         self.locations = locations or []
@@ -70,6 +75,9 @@ class DialogueSession:
         # Karivena knowledge_base) and which extra slots are mandatory.
         self.ds = data_source if data_source is not None else get_data_source()
         self.extra_required = tuple(getattr(self.ds, "extra_required", ()))
+        # Language: "te" (default), "en", or "ask" to let the caller choose.
+        self.lang = lang if lang in ("te", "en", "ask") else "te"
+        self.T = _TEMPLATES.get(self.lang, _T_TE)  # active template module
         self.state = GREETING
         # Phone handling differs by channel:
         #  - Voice (phone call): we still confirm the number by asking, so leave
@@ -85,26 +93,49 @@ class DialogueSession:
 
     # ---- public API ----
     def greeting(self) -> str:
+        """Opening line. If lang == 'ask', show the bilingual picker first;
+        otherwise greet directly in the chosen language."""
+        if self.lang == "ask":
+            self.state = ASK_LANGUAGE
+            return C.LANGUAGE_PROMPT
         self.state = INTENT
-        return self._speak(T.GREETING)
+        return self._speak(self.T.GREETING)
 
     def handle(self, user_text: str) -> str:
-        """Process one caller turn; return the agent's Telugu reply."""
+        """Process one caller turn; return the agent's reply."""
         text = nz.nfc(user_text or "").strip()
+
+        # Language selection happens before anything else.
+        if self.state == ASK_LANGUAGE:
+            return self._choose_language(text)
 
         # Global exits (any state)
         if self._wants_human(text):
             self.state = TRANSFER
-            return self._speak(T.TRANSFER)
+            return self._speak(self.T.TRANSFER)
         if self.state != CONFIRM and self._wants_goodbye(text):
             self.state = DONE
-            return self._speak(T.GOODBYE)
+            return self._speak(self.T.GOODBYE)
 
         try:
             return self._route(text)
         except Exception as e:
             logger.error(f"dialogue error: {e}")
-            return self._speak(T.NOT_UNDERSTOOD)
+            return self._speak(self.T.NOT_UNDERSTOOD)
+
+    def _choose_language(self, text: str) -> str:
+        """Set the language from the caller's pick, then greet + first question."""
+        choice = C.detect_language_choice(text)
+        if not choice:
+            return C.LANGUAGE_RETRY
+        self.lang = choice
+        self.T = _TEMPLATES[choice]
+        self.state = INTENT
+        # Greet, then advance straight to the first booking question so the
+        # caller sees one clear prompt after picking a language.
+        greeting = self._speak(self.T.GREETING)
+        first_q = self._advance_booking()
+        return f"{greeting}\n{first_q}" if first_q else greeting
 
     @property
     def finished(self) -> bool:
@@ -150,7 +181,7 @@ class DialogueSession:
 
         if intent == "cancel_booking":
             self.state = CANCEL_ASK_ID
-            return self._speak(T.ASK_BOOKING_NUMBER)
+            return self._speak(self.T.ASK_BOOKING_NUMBER)
         if intent in ("book_room", "check_availability", "ask_price", "unknown"):
             return self._advance_booking()
         if intent == "ask_facilities":
@@ -179,7 +210,7 @@ class DialogueSession:
     def _collect_location(self, text: str) -> str:
         loc = self._normalize_location(text)
         if not loc:
-            return self._retry(T.ASK_LOCATION)
+            return self._retry(self.T.ASK_LOCATION)
         self.slots.location = loc
         self.fails = 0
         return self._advance_booking()
@@ -199,7 +230,7 @@ class DialogueSession:
     def _collect_checkin(self, text: str) -> str:
         d = nz.parse_relative_date(text)
         if not d or d < nz.today():
-            return self._retry(T.ASK_CHECKIN)
+            return self._retry(self.T.ASK_CHECKIN)
         self.slots.check_in_date = d
         self.fails = 0
         return self._advance_booking()
@@ -207,7 +238,7 @@ class DialogueSession:
     def _collect_nights(self, text: str) -> str:
         n = nz.parse_nights(text)
         if not n or n < 1 or n > 60:
-            return self._retry(T.ASK_NIGHTS)
+            return self._retry(self.T.ASK_NIGHTS)
         self.slots.nights = n
         self.fails = 0
         return self._advance_booking()
@@ -215,7 +246,7 @@ class DialogueSession:
     def _collect_guests(self, text: str) -> str:
         g = nz.parse_number(text)
         if not g or g < 1 or g > 50:
-            return self._retry(T.ASK_GUESTS)
+            return self._retry(self.T.ASK_GUESTS)
         self.slots.num_guests = g
         self.fails = 0
         return self._advance_booking()
@@ -223,7 +254,7 @@ class DialogueSession:
     def _collect_room_type(self, text: str) -> str:
         rt = S.normalize_room_type(text)
         if not rt:
-            return self._retry(T.ASK_ROOM_TYPE)
+            return self._retry(self.T.ASK_ROOM_TYPE)
         self.slots.room_type = rt
         self.fails = 0
         return self._advance_booking()
@@ -231,7 +262,7 @@ class DialogueSession:
     def _collect_name(self, text: str) -> str:
         name = nz.nfc(text).strip()
         if len(name) < 2:
-            return self._retry(T.ASK_NAME)
+            return self._retry(self.T.ASK_NAME)
         self.slots.guest_name = name
         self.fails = 0
         return self._advance_booking()
@@ -239,7 +270,7 @@ class DialogueSession:
     def _collect_phone(self, text: str) -> str:
         phone = nz.parse_phone(text)
         if not phone:
-            return self._retry(T.ASK_PHONE)
+            return self._retry(self.T.ASK_PHONE)
         self.slots.callback_number = phone
         self.fails = 0
         return self._advance_booking()
@@ -247,7 +278,7 @@ class DialogueSession:
     def _collect_gotram(self, text: str) -> str:
         g = nz.nfc(text).strip()
         if len(g) < 2:
-            return self._retry(T.ASK_GOTRAM)
+            return self._retry(self.T.ASK_GOTRAM)
         self.slots.gotram = g
         self.fails = 0
         return self._advance_booking()
@@ -255,7 +286,7 @@ class DialogueSession:
     def _collect_email(self, text: str) -> str:
         email = nz.parse_email(text)
         if not email:
-            return self._retry(T.ASK_EMAIL)
+            return self._retry(self.T.ASK_EMAIL)
         self.slots.email = email
         self.fails = 0
         return self._advance_booking()
@@ -266,32 +297,32 @@ class DialogueSession:
         need = self.slots.missing_for_booking(self.extra_required)
         if "location" in need:
             self.state = ASK_LOCATION
-            return self._speak(T.ASK_LOCATION)
+            return self._speak(self.T.ASK_LOCATION)
         if "check_in_date" in need:
             self.state = ASK_CHECKIN
-            return self._speak(T.ASK_CHECKIN)
+            return self._speak(self.T.ASK_CHECKIN)
         if "nights" in need:
             self.state = ASK_NIGHTS
-            return self._speak(T.ASK_NIGHTS)
+            return self._speak(self.T.ASK_NIGHTS)
         if "num_guests" in need:
             self.state = ASK_GUESTS
-            return self._speak(T.ASK_GUESTS)
+            return self._speak(self.T.ASK_GUESTS)
         if "room_type" in need:
             self.state = ASK_ROOM_TYPE
-            return self._speak(T.ASK_ROOM_TYPE)
+            return self._speak(self.T.ASK_ROOM_TYPE)
         if "guest_name" in need:
             self.state = ASK_NAME
-            return self._speak(T.ASK_NAME)
+            return self._speak(self.T.ASK_NAME)
         # Live-mode extra slots (phone, gotram, email).
         if "phone" in need:
             self.state = ASK_PHONE
-            return self._speak(T.ASK_PHONE)
+            return self._speak(self.T.ASK_PHONE)
         if "gotram" in need:
             self.state = ASK_GOTRAM
-            return self._speak(T.ASK_GOTRAM)
+            return self._speak(self.T.ASK_GOTRAM)
         if "email" in need:
             self.state = ASK_EMAIL
-            return self._speak(T.ASK_EMAIL)
+            return self._speak(self.T.ASK_EMAIL)
         return self._check_and_confirm()
 
     def _check_and_confirm(self) -> str:
@@ -306,20 +337,31 @@ class DialogueSession:
             self.slots.check_in_date = None
             self.slots.nights = None
             self.state = ASK_CHECKIN
-            return self._speak(T.NOT_AVAILABLE)
+            return self._speak(self.T.NOT_AVAILABLE)
 
         nights = (co - ci).days
         total = avail.total_price or (avail.price_per_night * nights)
         self._quote_total = total
         self.state = CONFIRM
-        return self._speak(T.confirm_summary(
-            S.location_te(self.slots.location),
-            self.slots.room_type,
-            nz.date_to_telugu(ci),
-            f"{nz.number_to_telugu(nights)} రాత్రులు",
-            nz.number_to_telugu(self.slots.num_guests),
-            nz.number_to_telugu(total),
-        ))
+        # Location display: Telugu spelling for te, plain name for en.
+        loc_disp = S.location_te(self.slots.location) if self.lang == "te" \
+            else self.slots.location
+        if self.lang == "te":
+            nights_words = f"{nz.number_to_telugu(nights)} రాత్రులు"
+            summary = self.T.confirm_summary(
+                loc_disp, self.slots.room_type,
+                nz.date_to_telugu(ci), nights_words,
+                nz.number_to_telugu(self.slots.num_guests),
+                nz.number_to_telugu(total),
+            )
+        else:
+            nights_words = f"{nights} night" + ("s" if nights != 1 else "")
+            summary = self.T.confirm_summary(
+                loc_disp, self.slots.room_type,
+                ci.isoformat(), nights_words,
+                str(self.slots.num_guests), str(total),
+            )
+        return self._speak(summary)
 
     def _on_confirm(self, text: str) -> str:
         if _is_yes(text):
@@ -338,27 +380,31 @@ class DialogueSession:
             if not res.success:
                 if res.error == "no_rooms":
                     self.state = DONE
-                    return self._speak(T.NOT_AVAILABLE)
+                    return self._speak(self.T.NOT_AVAILABLE)
                 if res.error == "gotram_rejected":
                     # Let the caller re-state the gotram rather than ending.
                     self.slots.gotram = None
                     self.state = ASK_GOTRAM
-                    return self._speak(T.GOTRAM_REJECTED)
+                    return self._speak(self.T.GOTRAM_REJECTED)
                 self.state = DONE
-                return self._speak(T.NOT_UNDERSTOOD)
+                return self._speak(self.T.NOT_UNDERSTOOD)
             self.state = DONE
             # Live ids are alphanumeric (BK-XXXX); SQLite ids are 4 digits.
-            if "phone" in self.extra_required or (res.booking_id and not str(res.booking_id).isdigit()):
-                return self._speak(T.booking_done_live(res.booking_id))
-            id_words = nz.digits_to_telugu_grouped(res.booking_id, group=4)
-            return self._speak(T.booking_done(id_words))
+            is_live_id = "phone" in self.extra_required or (
+                res.booking_id and not str(res.booking_id).isdigit())
+            if is_live_id:
+                return self._speak(self.T.booking_done_live(res.booking_id))
+            # Digit ids: spell out in Telugu for te, read plainly for en.
+            id_words = (nz.digits_to_telugu_grouped(res.booking_id, group=4)
+                        if self.lang == "te" else str(res.booking_id))
+            return self._speak(self.T.booking_done(id_words))
         if _is_no(text):
             # correction loop: re-ask dates (most common change)
             self.slots.check_in_date = None
             self.slots.nights = None
             self.state = ASK_CHECKIN
-            return self._speak(T.ASK_CHECKIN)
-        return self._retry(T.CONFIRM_PROMPT, yesno=True)
+            return self._speak(self.T.ASK_CHECKIN)
+        return self._retry(self.T.CONFIRM_PROMPT, yesno=True)
 
     # ---- cancellation ----
     def _collect_cancel_id(self, text: str) -> str:
@@ -373,10 +419,10 @@ class DialogueSession:
             bid = str(n) if n else "".join(ch for ch in text if ch.isdigit())
         b = self.ds.get_booking(booking_id=bid) if bid else None
         if not b:
-            return self._retry(T.CANCEL_NOT_FOUND, prompt=T.ASK_BOOKING_NUMBER)
+            return self._retry(self.T.CANCEL_NOT_FOUND, prompt2=self.T.ASK_BOOKING_NUMBER)
         self.pending_cancel_id = bid
         self.state = CANCEL_CONFIRM
-        return self._speak(T.CONFIRM_PROMPT)
+        return self._speak(self.T.CONFIRM_PROMPT)
 
     def _on_cancel_confirm(self, text: str) -> str:
         if _is_yes(text):
@@ -387,11 +433,11 @@ class DialogueSession:
             if not ok:
                 ok = self.ds.cancel_booking(self.pending_cancel_id)
             self.state = DONE
-            return self._speak(T.CANCELLED if ok else T.CANCEL_NOT_FOUND)
+            return self._speak(self.T.CANCELLED if ok else self.T.CANCEL_NOT_FOUND)
         if _is_no(text):
             self.state = DONE
-            return self._speak(T.GOODBYE)
-        return self._retry(T.CONFIRM_PROMPT, yesno=True)
+            return self._speak(self.T.GOODBYE)
+        return self._retry(self.T.CONFIRM_PROMPT, yesno=True)
 
     # ---- helpers ----
     def _extract_into_slots(self, text: str):
@@ -432,8 +478,8 @@ class DialogueSession:
         if self.fails >= 2:
             self.fails = 0
             self.state = TRANSFER
-            return self._speak(T.TRANSFER)
-        msg = (T.YES_NO_RETRY if yesno else T.NOT_UNDERSTOOD) + " " + (prompt2 or prompt)
+            return self._speak(self.T.TRANSFER)
+        msg = (self.T.YES_NO_RETRY if yesno else self.T.NOT_UNDERSTOOD) + " " + (prompt2 or prompt)
         return self._speak(msg)
 
     def _wants_human(self, text: str) -> bool:
@@ -445,8 +491,20 @@ class DialogueSession:
         return any(w in t for w in ("వద్దు", "bye", "సెలవు")) and "బుక్" not in t
 
     def _speak(self, text: str) -> str:
-        """Telugu-script guard on every outgoing line (non-negotiable §1)."""
-        if not nz.is_telugu(text):
-            logger.warning("Non-Telugu output blocked by guard.")
-            return T.NOT_UNDERSTOOD
+        """
+        Language guard on every outgoing line.
+          * Telugu (te): the line MUST contain Telugu script (non-negotiable §1).
+          * English (en): the line must be non-empty and NOT Telugu script.
+        On failure, fall back to the active language's NOT_UNDERSTOOD.
+        """
+        text = text or ""
+        if self.lang == "te":
+            if not nz.is_telugu(text):
+                logger.warning("Non-Telugu output blocked by guard.")
+                return self.T.NOT_UNDERSTOOD
+            return text
+        # English: reject accidental Telugu / empty output.
+        if not text.strip() or nz.is_telugu(text):
+            logger.warning("Unexpected output blocked by English guard.")
+            return self.T.NOT_UNDERSTOOD
         return text
