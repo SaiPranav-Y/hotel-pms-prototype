@@ -1,0 +1,28 @@
+# Telugu Voice Booking Agent — pinned dependencies.
+# Install everything:   py -m pip install -r requirements.txt
+# The core (text mode) needs only the first group; audio deps are optional.
+
+# --- Core (Phase 1: text-mode dialogue, DB, LLM NLU) ---
+SQLAlchemy==2.0.50
+httpx==0.28.1            # talks to local Ollama /api/chat
+pydantic==2.13.5         # NLU schema validation
+python-dotenv==1.0.1     # optional .env loading
+
+# --- Speech-to-text (Phase 2) — optional, downloads a model on first use ---
+faster-whisper==1.2.1    # CTranslate2 backend; no PyTorch required
+numpy==1.26.4            # audio buffers (also pulled by faster-whisper)
+
+# --- Text-to-speech (Phase 3) — optional; edge-tts needs network ---
+edge-tts==7.2.8          # free Telugu voice; gated by ALLOW_CLOUD_TTS
+
+# --- Local mic/speaker loop (Phase 4) — optional; needs an audio device ---
+soundfile==0.14.0
+sounddevice==0.5.6
+
+# --- Dev / tests ---
+pytest==8.4.2
+
+# NOTE: Telephony (Phases 5-6) needs no Python deps in this repo — the mock
+# adapter is pure-Python. A real Asterisk/SIP channel is external (see
+# docs/TELEPHONY.md). An offline neural TTS (Piper/MMS) would add torch/onnx,
+# which are intentionally NOT pinned here (edge-tts is the working path).

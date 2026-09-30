@@ -13,3 +13,9 @@ __pycache__/
 .pytest_cache/
 .venv/
 venv/
+
+# Audio / model caches (generated at runtime)
+.tts_cache/
+*.wav
+*.mp3
+models/

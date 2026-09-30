@@ -51,3 +51,24 @@ if not RATE_CONFIG_PATH:
 # --- Feature flags ---
 ALLOW_CLOUD_TTS = os.getenv("ALLOW_CLOUD_TTS", "false").lower() == "true"
 STORE_TRANSCRIPTS = os.getenv("STORE_TRANSCRIPTS", "false").lower() == "true"
+
+# --- Speech-to-text (Phase 2, faster-whisper, local/offline) ---
+# Telugu ASR. On CPU use "small" or "base"; "medium"/"large-v3" are far slower.
+STT_MODEL = os.getenv("STT_MODEL", "small")
+STT_DEVICE = os.getenv("STT_DEVICE", "cpu")          # "cpu" | "cuda"
+STT_COMPUTE_TYPE = os.getenv("STT_COMPUTE_TYPE", "int8")  # int8 is CPU-friendly
+STT_LANGUAGE = os.getenv("STT_LANGUAGE", "te")       # Telugu
+STT_BEAM_SIZE = int(os.getenv("STT_BEAM_SIZE", "1"))  # 1 = greedy = fastest
+
+# --- Text-to-speech (Phase 3) ---
+# Default engine seam. "edge" is the working Telugu path but needs network +
+# ALLOW_CLOUD_TTS=true. "piper"/"mms" are offline seams (need extra deps).
+TTS_ENGINE = os.getenv("TTS_ENGINE", "edge")
+TTS_VOICE_TE = os.getenv("TTS_VOICE_TE", "te-IN-ShrutiNeural")
+TTS_CACHE_DIR = os.getenv("TTS_CACHE_DIR", str(_ROOT / ".tts_cache"))
+
+# --- Local mic/speaker loop (Phase 4) ---
+AUDIO_SAMPLE_RATE = int(os.getenv("AUDIO_SAMPLE_RATE", "16000"))  # whisper wants 16k
+AUDIO_SILENCE_RMS = float(os.getenv("AUDIO_SILENCE_RMS", "0.01"))  # below = silence
+AUDIO_SILENCE_SECS = float(os.getenv("AUDIO_SILENCE_SECS", "1.2"))  # end-of-turn hush
+AUDIO_MAX_TURN_SECS = float(os.getenv("AUDIO_MAX_TURN_SECS", "15"))  # hard cap per turn
