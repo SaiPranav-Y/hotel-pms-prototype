@@ -1,0 +1,15 @@
+# Local secrets / config
+.env
+
+# Generated SQLite database (seeded from source JSON at runtime)
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
