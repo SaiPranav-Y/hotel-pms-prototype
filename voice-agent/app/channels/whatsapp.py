@@ -55,8 +55,11 @@ class _Conversation:
 class WhatsAppChannel:
     """Holds per-sender conversations and drives them via DialogueSession."""
 
-    def __init__(self, llm=None, data_source=None):
+    def __init__(self, llm=None, data_source=None, lang=None):
         self.llm = llm
+        # Language mode for new conversations: "ask" (default) shows the
+        # bilingual picker first; "te"/"en" go straight to that language.
+        self.lang = lang or config.LANG
         # Build one shared data source (sqlite or live) for all conversations.
         self.ds = data_source if data_source is not None else get_data_source()
         try:
@@ -110,6 +113,7 @@ class WhatsAppChannel:
             llm=self.llm, caller_id=phone, locations=self._locations,
             data_source=self.ds,
             prefill_phone=True,  # sender's WhatsApp number is their contact
+            lang=self.lang,
         )
         self._convos[phone] = _Conversation(session)
 
@@ -123,8 +127,14 @@ class WhatsAppChannel:
         """
         convo = self._convos[phone]
         greeting = convo.session.greeting()
-        # Advance to the first booking question without consuming a user turn.
-        first_q = convo.session.handle("బుక్")  # 'book' intent → asks location
+        # If we're still asking the caller to pick a language, just show the
+        # picker — their next reply selects it and auto-advances to the first
+        # question (handled by DialogueSession._choose_language).
+        from app.dialogue.state_machine import ASK_LANGUAGE
+        if convo.session.state == ASK_LANGUAGE:
+            return greeting
+        # Otherwise advance to the first booking question in one message.
+        first_q = convo.session.handle("book")  # 'book' intent → asks location
         return self._join(greeting, first_q)
 
     def _maybe_finish(self, phone: str):

@@ -27,6 +27,11 @@ DB_PATH = os.getenv("VOICE_AGENT_DB", str(_ROOT / "voice_agent.db"))
 HOTEL_NAME = os.getenv("HOTEL_NAME", "Karivena Satram")
 TIMEZONE = os.getenv("TIMEZONE", "Asia/Kolkata")
 
+# --- Language ---
+# "ask" = let the caller choose English or Telugu at the start (default),
+# "te"  = Telugu only, "en" = English only.
+LANG = os.getenv("LANG_MODE", "ask")
+
 # --- Data sources (reuse Karivena room/rate data from the sibling backend) ---
 # Points at hotel-voice-booking-demo/app if present, else the repo voice-ai copy.
 _CANDIDATES = [

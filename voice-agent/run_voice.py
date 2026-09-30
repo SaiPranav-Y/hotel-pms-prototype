@@ -123,14 +123,27 @@ def _listen(stt, mic_mod) -> str | None:
         return None
 
 
+def _lang_from_argv(argv) -> str:
+    if "--en" in argv:
+        return "en"
+    if "--te" in argv:
+        return "te"
+    if "--lang" in argv:
+        i = argv.index("--lang")
+        if i + 1 < len(argv) and argv[i + 1] in ("ask", "en", "te"):
+            return argv[i + 1]
+    return config.LANG
+
+
 def main():
     argv = sys.argv[1:]
     use_llm = "--no-llm" not in argv
     force_text = "--text" in argv
+    lang = _lang_from_argv(argv)
 
     print("=" * 60)
-    print(f"  {config.HOTEL_NAME} — Telugu Voice Agent (Local Voice)")
-    print("  Speak in Telugu. Say/type 'exit' to quit.")
+    print(f"  {config.HOTEL_NAME} — Booking Agent (Local Voice)")
+    print("  Say/type 'exit' to quit.  (--en / --te to pick a language)")
     print("=" * 60)
 
     seed(config.DB_PATH)
@@ -142,7 +155,8 @@ def main():
     stt = _build_stt(force_text)
     tts = _build_tts()
 
-    session = DialogueSession(llm=llm, caller_id="+919876543210", locations=locations)
+    session = DialogueSession(llm=llm, caller_id="+919876543210",
+                              locations=locations, lang=lang)
     _speak(tts, mic_mod, session.greeting())
 
     while not session.finished:
