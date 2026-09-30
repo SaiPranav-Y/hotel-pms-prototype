@@ -30,7 +30,14 @@ ASK_GUESTS = "ఎంత మంది అతిథులు వస్తారు
 ASK_ROOM_TYPE = "మీకు ఏసీ గది కావాలా, నాన్-ఏసీ గది కావాలా?"
 ASK_LOCATION = "మీకు ఏ ప్రాంతంలో గది కావాలి?"
 ASK_NAME = "దయచేసి మీ పేరు చెప్పగలరా?"
-ASK_PHONE = "దయచేసి మీ ఫోన్ నంబర్ చెప్పగలరా?"
+ASK_PHONE = "దయచేసి మీ పది అంకెల ఫోన్ నంబర్ చెప్పగలరా?"
+# Live-booking-only slots (Karivena requires gotram + email + phone).
+ASK_GOTRAM = "దయచేసి మీ గోత్రం చెప్పగలరా?"
+ASK_EMAIL = "దయచేసి మీ ఈమెయిల్ చిరునామా చెప్పగలరా?"
+GOTRAM_REJECTED = (
+    "క్షమించండి, మీరు చెప్పిన గోత్రం మా జాబితాలో కనిపించలేదు. "
+    "దయచేసి మీ గోత్రం మరోసారి చెప్పగలరా?"
+)
 
 NOT_UNDERSTOOD = "క్షమించండి, నాకు సరిగ్గా వినిపించలేదు. దయచేసి మళ్ళీ చెప్పగలరా?"
 PLEASE_HOLD = "ఒక్క నిమిషం, వివరాలు చూస్తున్నాను."
@@ -79,6 +86,20 @@ def booking_done(booking_id_words: str) -> str:
 
 def read_back_name(name: str) -> str:
     return f"మీ పేరు {name}, సరిగ్గా ఉందా?"
+
+
+def booking_done_live(booking_id: str) -> str:
+    """
+    Live-mode confirmation. The booking id is an alphanumeric code like
+    'BK-68CD5856', so we read it as-is rather than spelling digits in Telugu.
+    Also tells the caller the payment link + confirmation was sent to WhatsApp.
+    """
+    return (
+        "మీ బుకింగ్ ధృవీకరించబడింది. "
+        f"మీ బుకింగ్ నంబర్ {booking_id}. "
+        "చెల్లింపు లింక్ మరియు వివరాలు మీ వాట్సాప్‌కు పంపబడ్డాయి. "
+        "ధన్యవాదాలు!"
+    )
 
 
 def read_back_phone(phone_words: str) -> str:
