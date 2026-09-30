@@ -1,0 +1,149 @@
+rules_version = '2';
+
+// ============================================================
+//  Karivena Satram / Temple PMS — Firestore Security Rules
+// ------------------------------------------------------------
+//  Model:
+//    - Staff identity = their email (auth token). The `users/{email}` doc
+//      holds { role: supervisor|admin|super_admin, active: bool }.
+//    - These rules enforce, at the DATABASE layer, what the Flutter UI and the
+//      Python backend enforce in code — so an authenticated client cannot
+//      bypass the app and read/write arbitrary data.
+//    - The Python backend uses the Admin SDK (service account), which BYPASSES
+//      these rules — so voice/WhatsApp writes are unaffected.
+// ============================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------- helpers ----------
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function userEmail() {
+      return request.auth.token.email.lower();
+    }
+
+    // The caller's staff profile document (users are keyed by lowercased email)
+    function profile() {
+      return get(/databases/$(database)/documents/users/$(userEmail())).data;
+    }
+
+    function hasProfile() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/users/$(userEmail()));
+    }
+
+    function isActiveStaff() {
+      return hasProfile() && profile().active == true;
+    }
+
+    function role() {
+      return hasProfile() ? profile().role : 'none';
+    }
+
+    function isAdmin() {
+      return isActiveStaff() && (role() == 'admin' || role() == 'super_admin');
+    }
+
+    function isSuperAdmin() {
+      return isActiveStaff() && role() == 'super_admin';
+    }
+
+    // ---------- reservations ----------
+    // Any active staff may read + create + update reservations (front-desk work).
+    // Only admins may delete (destructive). Voice/WhatsApp writes come via the
+    // Admin SDK and bypass these rules.
+    match /reservations/{id} {
+      allow read:   if isActiveStaff();
+      allow create: if isActiveStaff();
+      allow update: if isActiveStaff();
+      allow delete: if isAdmin();
+    }
+
+    // ---------- audit logs (append-only) ----------
+    // Anyone active can append an audit entry; nobody can edit or delete them.
+    // Only admins can read the trail.
+    match /audit_logs/{id} {
+      allow read:   if isAdmin();
+      allow create: if isActiveStaff();
+      allow update, delete: if false;
+    }
+
+    // ---------- temples / inventory ----------
+    // All active staff read; only admins change capacity/config.
+    match /temples/{id} {
+      allow read:  if isActiveStaff();
+      allow write: if isAdmin();
+    }
+
+    // ---------- per-room assignments (physical inventory) ----------
+    match /room_assignments/{id} {
+      allow read:  if isActiveStaff();
+      allow write: if isActiveStaff();
+    }
+
+    // ---------- housekeeping room states ----------
+    match /room_states/{id} {
+      allow read:  if isActiveStaff();
+      allow write: if isActiveStaff();
+    }
+
+    // ---------- rates (admin-editable pricing) ----------
+    match /rates/{id} {
+      allow read:  if isActiveStaff();
+      allow write: if isAdmin();
+    }
+
+    // ---------- sevas / donation plans (admin-editable) ----------
+    match /sevas/{id} {
+      allow read:  if isActiveStaff();
+      allow write: if isAdmin();
+    }
+
+    // ---------- payments ----------
+    // Read for active staff. Client writes disallowed — payments are recorded
+    // by the backend (Admin SDK) to keep amounts/status trustworthy.
+    match /payments/{id} {
+      allow read:  if isActiveStaff();
+      allow write: if false;
+    }
+
+    // ---------- guests / contacts (CRM) ----------
+    match /contacts/{id} {
+      allow read:  if isActiveStaff();
+      allow write: if isActiveStaff();
+    }
+    match /guests/{id} {
+      allow read:  if isActiveStaff();
+      allow write: if isActiveStaff();
+    }
+
+    // ---------- calls (voice transcripts/metadata) ----------
+    match /calls/{id} {
+      allow read:  if isActiveStaff();
+      allow write: if false; // written by backend Admin SDK
+    }
+
+    // ---------- users (staff accounts + roles) ----------
+    // A user may read their OWN profile (needed at login to resolve role).
+    // Only super_admin may list all users or create/modify/delete accounts.
+    match /users/{email} {
+      allow get:    if isSignedIn() && (userEmail() == email || isSuperAdmin());
+      allow list:   if isSuperAdmin();
+      allow write:  if isSuperAdmin();
+    }
+
+    // ---------- approved gotrams (reference data) ----------
+    match /allowed_gotrams/{id} {
+      allow read:  if isActiveStaff();
+      allow write: if isAdmin();
+    }
+
+    // ---------- default: deny everything else ----------
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 
+import '../constants/karivena_data.dart';
 import '../models/reservation.dart';
 import '../models/temple.dart';
 import '../services/firestore_service.dart';
+import '../utils/validators.dart';
 
 /// Dialog mode — determines Add vs Edit behaviour.
 enum ReservationDialogMode { add, edit }
@@ -34,7 +36,8 @@ class _ReservationDialogState extends State<ReservationDialog> {
   late final TextEditingController _phoneController;
   late final TextEditingController _ageController;
   late final TextEditingController _roomsController;
-  late final TextEditingController _roomTypeController;
+  late final TextEditingController _gotramController;
+  final FocusNode _gotramFocus = FocusNode();
   final FirestoreService _firestoreService = FirestoreService();
 
   bool _isSubmitting = false;
@@ -44,11 +47,29 @@ class _ReservationDialogState extends State<ReservationDialog> {
   DateTime? _checkIn;
   DateTime? _checkOut;
   String? _selectedTempleName;
+  String _selectedRoomType = 'AC';
+  String _selectedPaymentMethod = 'cash';
   String _selectedStatus = 'Waiting for Approval';
   late final String _reservationMode;
   List<Temple> _temples = [];
 
-  static final RegExp _phoneRegex = RegExp(r'^\+?[\d\s\-]+$');
+  /// Live-computed total for the current selection (nights x rooms x rate).
+  int get _computedTotal {
+    if (_checkIn == null || _checkOut == null || _selectedTempleName == null) {
+      return 0;
+    }
+    final rooms = int.tryParse(_roomsController.text.trim()) ?? 1;
+    return computeStayTotal(
+      location: _selectedTempleName!,
+      roomType: _selectedRoomType,
+      checkIn: _checkIn!,
+      checkOut: _checkOut!,
+      rooms: rooms,
+    );
+  }
+
+  int get _nightlyRate =>
+      _selectedTempleName == null ? 0 : rateFor(_selectedTempleName!, _selectedRoomType);
 
   static const _statusOptions = [
     'Waiting for Approval',
@@ -70,12 +91,16 @@ class _ReservationDialogState extends State<ReservationDialog> {
         TextEditingController(text: r != null && r.customerAge > 0 ? '${r.customerAge}' : '');
     _roomsController =
         TextEditingController(text: r != null ? '${r.noOfRooms}' : '1');
-    _roomTypeController = TextEditingController(text: r?.roomType ?? '');
+    _gotramController = TextEditingController(text: r?.gotram ?? '');
 
     if (r != null) {
       _checkIn = r.checkIn;
       _checkOut = r.checkOut;
       _selectedTempleName = r.templeName.isNotEmpty ? r.templeName : null;
+      // Map stored room type onto AC / Non-AC
+      _selectedRoomType =
+          r.roomType.toLowerCase().contains('non') ? 'Non-AC' : 'AC';
+      if (r.paymentMethod.isNotEmpty) _selectedPaymentMethod = r.paymentMethod;
       _selectedStatus = r.reservationStatus;
       _reservationMode = r.reservationMode;
     } else {
@@ -114,28 +139,24 @@ class _ReservationDialogState extends State<ReservationDialog> {
     _phoneController.dispose();
     _ageController.dispose();
     _roomsController.dispose();
-    _roomTypeController.dispose();
+    _gotramController.dispose();
+    _gotramFocus.dispose();
     super.dispose();
   }
 
-  String? _validateName(String? value) {
-    if (value == null || value.trim().isEmpty) return 'Customer name is required';
-    return null;
-  }
+  String? _validateName(String? value) => Validators.name(value);
 
-  String? _validatePhone(String? value) {
-    if (value == null || value.isEmpty) return 'Phone number is required';
-    if (!_phoneRegex.hasMatch(value)) {
-      return 'Only digits, spaces, hyphens, or leading + allowed';
+  String? _validatePhone(String? value) => Validators.phone(value);
+
+  String? _validateRooms(String? value) => Validators.rooms(value);
+
+  String? _validateGotram(String? value) {
+    if (value == null || value.trim().isEmpty) {
+      return 'Gotram is required (community eligibility)';
     }
-    return null;
-  }
-
-  String? _validateRooms(String? value) {
-    if (value == null || value.trim().isEmpty) return 'Required';
-    final parsed = int.tryParse(value.trim());
-    if (parsed == null || parsed < 1) return 'Must be at least 1';
-    if (parsed > 100) return 'Must be at most 100';
+    if (matchGotram(value) == null) {
+      return 'Not in the approved gotram list';
+    }
     return null;
   }
 
@@ -182,8 +203,20 @@ class _ReservationDialogState extends State<ReservationDialog> {
       return;
     }
 
+    // Extra guard on the stay range (defence in depth beyond field validators).
+    final stayErr = Validators.stay(_checkIn, _checkOut);
+    if (stayErr != null) {
+      setState(() => _errorMessage = stayErr);
+      return;
+    }
+
     final noOfRooms = int.parse(_roomsController.text.trim());
     final age = int.tryParse(_ageController.text.trim()) ?? 0;
+    // Sanitize + normalise inputs before persisting.
+    final cleanName = Validators.sanitizeName(_nameController.text);
+    final cleanPhone = Validators.normalizePhone(_phoneController.text);
+    // Normalise gotram to its canonical approved name
+    final canonicalGotram = matchGotram(_gotramController.text) ?? _gotramController.text.trim();
 
     setState(() {
       _isSubmitting = true;
@@ -193,14 +226,18 @@ class _ReservationDialogState extends State<ReservationDialog> {
     try {
       final reservation = Reservation(
         id: widget.existingReservation?.id ?? '',
-        customerName: _nameController.text.trim(),
-        customerPhone: _phoneController.text.trim(),
+        customerName: cleanName,
+        customerPhone: cleanPhone,
         customerAge: age,
+        gotram: canonicalGotram,
         templeName: _selectedTempleName!,
-        roomType: _roomTypeController.text.trim(),
+        roomType: _selectedRoomType,
         checkIn: _checkIn!,
         checkOut: _checkOut!,
         noOfRooms: noOfRooms,
+        totalPrice: _computedTotal,
+        paymentMethod: _selectedPaymentMethod,
+        paymentStatus: widget.existingReservation?.paymentStatus ?? 'pending',
         reservationStatus: _selectedStatus,
         reservationMode: _reservationMode,
         createdAt: widget.existingReservation?.createdAt ?? DateTime.now(),
@@ -209,17 +246,35 @@ class _ReservationDialogState extends State<ReservationDialog> {
       if (_isEditMode) {
         await _firestoreService.updateReservation(reservation.id, reservation);
       } else {
-        await _firestoreService.addReservation(reservation);
+        // Concurrency-safe create: atomically verifies availability + books,
+        // preventing double-booking of the last room across all channels.
+        final capacity = _capacityForSelectedTemple();
+        await _firestoreService.createReservationAudited(
+          reservation,
+          templeCapacity: capacity,
+          source: 'walk_in',
+        );
       }
 
       if (mounted) Navigator.pop(context);
+    } on RoomUnavailableException catch (e) {
+      setState(() => _errorMessage = e.message);
     } on FirestoreServiceException catch (e) {
       setState(() => _errorMessage = e.message);
     } catch (e) {
-      setState(() => _errorMessage = 'An unexpected error occurred.');
+      setState(() =>
+          _errorMessage = 'Could not save. Check your connection and try again.');
     } finally {
       if (mounted) setState(() => _isSubmitting = false);
     }
+  }
+
+  /// Total room capacity for the currently selected temple (0 if unknown).
+  int _capacityForSelectedTemple() {
+    for (final t in _temples) {
+      if (t.templeName == _selectedTempleName) return t.totalCapacity;
+    }
+    return 0;
   }
 
   String _formatDate(DateTime? date) {
@@ -351,6 +406,56 @@ class _ReservationDialogState extends State<ReservationDialog> {
                       ),
                       const SizedBox(height: 14),
 
+                      // Gotram (mandatory — approved-list autocomplete)
+                      RawAutocomplete<String>(
+                        textEditingController: _gotramController,
+                        focusNode: _gotramFocus,
+                        optionsBuilder: (TextEditingValue v) {
+                          final q = v.text.trim().toLowerCase();
+                          if (q.isEmpty) return kGotramNames;
+                          return kGotramNames
+                              .where((g) => g.toLowerCase().contains(q));
+                        },
+                        fieldViewBuilder:
+                            (context, textCtrl, focusNode, onSubmit) {
+                          return TextFormField(
+                            controller: textCtrl,
+                            focusNode: focusNode,
+                            decoration: const InputDecoration(
+                              labelText: 'Gotram (required)',
+                              hintText: 'Start typing… e.g. Bharadwaja',
+                              prefixIcon: Icon(Icons.account_balance_rounded),
+                            ),
+                            validator: _validateGotram,
+                          );
+                        },
+                        optionsViewBuilder: (context, onSelected, options) {
+                          return Align(
+                            alignment: Alignment.topLeft,
+                            child: Material(
+                              elevation: 4,
+                              borderRadius: BorderRadius.circular(8),
+                              child: ConstrainedBox(
+                                constraints: const BoxConstraints(
+                                    maxHeight: 220, maxWidth: 400),
+                                child: ListView(
+                                  padding: EdgeInsets.zero,
+                                  shrinkWrap: true,
+                                  children: options
+                                      .map((o) => ListTile(
+                                            dense: true,
+                                            title: Text(o),
+                                            onTap: () => onSelected(o),
+                                          ))
+                                      .toList(),
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                      const SizedBox(height: 14),
+
                       // Temple selector
                       if (_isLoadingTemples)
                         const Center(
@@ -379,15 +484,24 @@ class _ReservationDialogState extends State<ReservationDialog> {
                         ),
                       const SizedBox(height: 14),
 
-                      // Room type
-                      TextFormField(
-                        controller: _roomTypeController,
+                      // Room type (AC / Non-AC) + live rate
+                      DropdownButtonFormField<String>(
+                        initialValue: _selectedRoomType,
                         decoration: const InputDecoration(
                           labelText: 'Room Type',
-                          hintText: 'e.g. Double Cot with A/C',
                           prefixIcon: Icon(Icons.bed_rounded),
                         ),
-                        textInputAction: TextInputAction.next,
+                        items: kRoomTypes
+                            .map((t) =>
+                                DropdownMenuItem(value: t, child: Text(t)))
+                            .toList(),
+                        onChanged: (v) =>
+                            setState(() => _selectedRoomType = v ?? 'AC'),
+                      ),
+                      const SizedBox(height: 6),
+                      _RateHint(
+                        nightly: _nightlyRate,
+                        total: _computedTotal,
                       ),
                       const SizedBox(height: 14),
 
@@ -424,6 +538,24 @@ class _ReservationDialogState extends State<ReservationDialog> {
                         ),
                         keyboardType: TextInputType.number,
                         validator: _validateRooms,
+                        onChanged: (_) => setState(() {}),
+                      ),
+                      const SizedBox(height: 14),
+
+                      // Payment method
+                      DropdownButtonFormField<String>(
+                        initialValue: _selectedPaymentMethod,
+                        decoration: const InputDecoration(
+                          labelText: 'Payment Method',
+                          prefixIcon: Icon(Icons.payments_outlined),
+                        ),
+                        isExpanded: true,
+                        items: kPaymentMethods
+                            .map((m) => DropdownMenuItem(
+                                value: m.id, child: Text(m.name)))
+                            .toList(),
+                        onChanged: (v) => setState(
+                            () => _selectedPaymentMethod = v ?? 'cash'),
                       ),
                       const SizedBox(height: 14),
 
@@ -501,6 +633,57 @@ class _ReservationDialogState extends State<ReservationDialog> {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Small inline hint showing the nightly rate and computed stay total.
+class _RateHint extends StatelessWidget {
+  final int nightly;
+  final int total;
+
+  const _RateHint({required this.nightly, required this.total});
+
+  @override
+  Widget build(BuildContext context) {
+    if (nightly <= 0) {
+      return Row(
+        children: [
+          Icon(Icons.info_outline_rounded, size: 14, color: Colors.grey.shade400),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              'No configured rate for this location/type yet.',
+              style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
+            ),
+          ),
+        ],
+      );
+    }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFF8B4513).withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.currency_rupee_rounded,
+              size: 16, color: Color(0xFF8B4513)),
+          const SizedBox(width: 6),
+          Text('$nightly / night',
+              style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF8B4513))),
+          const Spacer(),
+          Text('Total: ₹$total',
+              style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: Color(0xFF1E293B))),
+        ],
       ),
     );
   }

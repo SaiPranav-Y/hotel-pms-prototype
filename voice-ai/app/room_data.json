@@ -1,0 +1,142 @@
+{
+  "brundavanam": {
+    "name": "Brundavanam",
+    "total_rooms": 5,
+    "ac_rooms": 5,
+    "nonac_rooms": 0,
+    "buildings": [
+      "Building One",
+      "Building Two"
+    ],
+    "prices_ac": [
+      1200
+    ],
+    "prices_nonac": []
+  },
+  "kasi": {
+    "name": "Kasi",
+    "total_rooms": 63,
+    "ac_rooms": 63,
+    "nonac_rooms": 0,
+    "buildings": [
+      "Main Building",
+      "OLIYA Guest House",
+      "Pandey Haveli"
+    ],
+    "prices_ac": [
+      500,
+      1600,
+      1800,
+      2500,
+      4000,
+      8000
+    ],
+    "prices_nonac": []
+  },
+  "mahanandi": {
+    "name": "Mahanandi",
+    "total_rooms": 27,
+    "ac_rooms": 7,
+    "nonac_rooms": 20,
+    "buildings": [
+      "Main Building"
+    ],
+    "prices_ac": [
+      1200
+    ],
+    "prices_nonac": [
+      600
+    ]
+  },
+  "naimisaranyam": {
+    "name": "Naimisaranyam",
+    "total_rooms": 4,
+    "ac_rooms": 0,
+    "nonac_rooms": 4,
+    "buildings": [
+      "Sounak Gaddi"
+    ],
+    "prices_ac": [],
+    "prices_nonac": [
+      700,
+      900
+    ]
+  },
+  "tirupathi": {
+    "name": "Tirupathi",
+    "total_rooms": 40,
+    "ac_rooms": 40,
+    "nonac_rooms": 0,
+    "buildings": [
+      "Main Building"
+    ],
+    "prices_ac": [
+      300,
+      1500,
+      2000,
+      2500
+    ],
+    "prices_nonac": []
+  },
+  "vruddasramam": {
+    "name": "Vruddasramam",
+    "total_rooms": 2,
+    "ac_rooms": 2,
+    "nonac_rooms": 0,
+    "buildings": [
+      "Vruddasramam"
+    ],
+    "prices_ac": [
+      1500
+    ],
+    "prices_nonac": []
+  },
+  "rameswaram": {
+    "name": "Rameswaram",
+    "total_rooms": 15,
+    "ac_rooms": 8,
+    "nonac_rooms": 7,
+    "buildings": [
+      "Old Building"
+    ],
+    "prices_ac": [
+      1200,
+      2400
+    ],
+    "prices_nonac": [
+      700
+    ]
+  },
+  "arunachalam": {
+    "name": "Arunachalam",
+    "total_rooms": 0,
+    "ac_rooms": 0,
+    "nonac_rooms": 0,
+    "buildings": [],
+    "prices_ac": [],
+    "prices_nonac": []
+  },
+  "srisailam": {
+    "name": "Srisailam",
+    "total_rooms": 112,
+    "ac_rooms": 79,
+    "nonac_rooms": 33,
+    "buildings": [
+      "New Building",
+      "Old Building"
+    ],
+    "prices_ac": [],
+    "prices_nonac": []
+  },
+  "shiridi": {
+    "name": "Shiridi",
+    "total_rooms": 92,
+    "ac_rooms": 45,
+    "nonac_rooms": 47,
+    "buildings": [
+      "NEW BUILDING"
+    ],
+    "prices_ac": [],
+    "prices_nonac": []
+  }
+}
