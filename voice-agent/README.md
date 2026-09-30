@@ -18,13 +18,18 @@ run_voice.py  : mic → STT     → DialogueSession → TTS → speaker     (Pha
 run_call.py   : phone → STT   → DialogueSession → TTS → phone       (Phases 5-6)
 ```
 
-**New:** the agent can book against **two data sources** — a self-contained
-offline **SQLite** DB (default), or the **live Karivena PMS data** in the sibling
-`hotel-voice-booking-demo` project (same `knowledge_base` + Firestore the PMS
-uses). Switch with `DATA_SOURCE=sqlite|live`.
+There are three ways to talk to the **same** Telugu booking agent: text, voice,
+and **WhatsApp** — all sharing one dialogue core (same greeting, gotram, email,
+etc.). It can book against a local practice database or the **live Karivena PMS
+data** (`DATA_SOURCE=sqlite|live`).
 
-- **Step-by-step setup:** see **[SETUP.md](SETUP.md)**
-- **How the two projects connect:** see **[docs/INTEGRATION.md](docs/INTEGRATION.md)**
+> **New to this? Start here:** double-click **`start_here.bat`** (or run
+> `py start_here.py`) for a guided menu, and read the plain-language
+> **[GETTING_STARTED.md](GETTING_STARTED.md)**.
+
+- **End-user guide (no coding):** **[GETTING_STARTED.md](GETTING_STARTED.md)**
+- **Full setup / live mode / Firebase:** **[SETUP.md](SETUP.md)**
+- **How this connects to the PMS:** **[docs/INTEGRATION.md](docs/INTEGRATION.md)**
 
 ---
 
@@ -152,6 +157,30 @@ Real telephony is intentionally **out of scope** (a phone number isn't free).
 The repo ships the `TelephonyAdapter` seam, a working in-memory mock, and
 Asterisk/SIP config templates. To connect a free local SIP softphone via
 Asterisk, see **[docs/TELEPHONY.md](docs/TELEPHONY.md)**.
+
+---
+
+## WhatsApp text channel
+
+The same Telugu dialogue also runs over **WhatsApp text** — same greeting, same
+guided questions, same gotram/email collection. The sender's WhatsApp number is
+used as their contact automatically (so the phone question is skipped).
+
+```powershell
+py run_whatsapp.py            # starts the webhook on :8100 (MOCK send by default)
+```
+
+Test it without a WhatsApp account by POSTing to `/webhook`:
+
+```
+POST /webhook   {"from": "+919876543210", "text": "namaste"}
+```
+
+It accepts both a simple `{from, text}` body and the Meta WhatsApp Cloud API
+webhook shape, and replies in Telugu. Outbound sending is MOCK (logged) until you
+configure a provider (`WHATSAPP_TOKEN`+`WHATSAPP_PHONE_ID`, or
+`WHATSAPP_WEBHOOK_URL`). Set `DATA_SOURCE=live` to book into the PMS. See
+[GETTING_STARTED.md](GETTING_STARTED.md) for the friendly walkthrough.
 
 ---
 
