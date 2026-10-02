@@ -55,7 +55,9 @@ CALL_PAGE_HTML = """<!DOCTYPE html>
 </div>
 <script>
 let ws=null,rec=null,isActive=false,isSpeaking=false,isProc=false,chunks=[],micStream=null;
-const synth=window.speechSynthesis;
+// Single AudioContext for the whole call — mic + Kaveri both routed through it.
+// MediaRecorder records mixDest.stream so both sides end up in the file.
+let audioCtx=null,mixDest=null,micSourceNode=null;
 const B=document.getElementById('B'),S=document.getElementById('S'),T=document.getElementById('T'),I=document.getElementById('I'),E=document.getElementById('E'),R=document.getElementById('R');
 let recognition=null;
 
@@ -65,16 +67,34 @@ function toggleCall(){isActive?endCall():startCall()}
 async function startCall(){
     const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
     if(!SR){err('Use Chrome or Edge for voice.');return}
-    try{micStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true}})}catch(e){err('Microphone access denied.');return}
+    try{micStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}})}catch(e){err('Microphone access denied.');return}
+
+    // Create AudioContext + mix bus. MUST happen inside a user-gesture handler
+    // (this onclick chain qualifies) so Chrome starts it in "running" state.
+    audioCtx=new (window.AudioContext||window.webkitAudioContext)({sampleRate:48000});
+    mixDest=audioCtx.createMediaStreamDestination();
+
+    // Mic → mix bus (and NOT to speakers — avoids feedback)
+    micSourceNode=audioCtx.createMediaStreamSource(micStream);
+    micSourceNode.connect(mixDest);
+
+    // MediaRecorder listens to the mix bus stream, NOT micStream.
+    // Every audio buffer routed into mixDest ends up in the recording.
     chunks=[];
-    const mt=MediaRecorder.isTypeSupported('audio/webm;codecs=opus')?'audio/webm;codecs=opus':'audio/webm';
-    rec=new MediaRecorder(micStream,{mimeType:mt});
-    rec.ondataavailable=e=>{if(e.data.size>0)chunks.push(e.data)};
-    rec.start(1000);R.classList.add('on');
-    recognition=new SR();recognition.continuous=false;recognition.interimResults=false;recognition.lang='en-IN';recognition.maxAlternatives=1;
+    const mt=MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+        ?'audio/webm;codecs=opus':'audio/webm';
+    rec=new MediaRecorder(mixDest.stream,{mimeType:mt});
+    rec.ondataavailable=e=>{if(e.data&&e.data.size>0)chunks.push(e.data)};
+    rec.start(500); // collect chunks every 500 ms for better granularity
+    R.classList.add('on');
+
+    recognition=new SR();
+    recognition.continuous=false;recognition.interimResults=false;
+    recognition.lang='en-IN';recognition.maxAlternatives=1;
     recognition.onresult=e=>{const t=e.results[0][0].transcript.trim();if(t&&!isSpeaking&&!isProc){addTx('guest',t);send(t)}};
     recognition.onerror=e=>{if(e.error==='no-speech'||e.error==='aborted')schListen()};
     recognition.onend=()=>schListen();
+
     const proto=location.protocol==='https:'?'wss:':'ws:';
     ws=new WebSocket(proto+'//'+location.host+'/voice');
     ws.onopen=()=>{isActive=true;B.className='btn active';B.innerHTML='&#128225;';S.textContent='Connected...';S.className='st speaking';T.style.display='block';I.style.display='none';isSpeaking=true};
@@ -84,10 +104,85 @@ async function startCall(){
 }
 
 function send(t){if(!ws||ws.readyState!==1)return;isProc=true;S.textContent='Kaveri is thinking...';S.className='st proc';B.className='btn proc';stopListen();ws.send(JSON.stringify({type:'transcript',text:t}))}
-function handleMsg(d){const t=d.text||'';if(!t)return;addTx('kaveri',t);isSpeaking=true;isProc=false;S.textContent='Kaveri speaking...';S.className='st speaking';B.className='btn active';stopListen();if(d.type==='audio_response'&&d.audio)playAudio(d.audio).then(done);else speakTTS(t).then(done)}
+
+function handleMsg(d){
+    const t=d.text||'';
+    if(!t)return;
+    addTx('kaveri',t);
+    isSpeaking=true;isProc=false;
+    S.textContent='Kaveri speaking...';S.className='st speaking';B.className='btn active';
+    stopListen();
+    if(d.type==='audio_response'&&d.audio){
+        playAudioBuffer(d.audio).then(done);
+    } else {
+        // Server TTS unavailable — speak via browser and record silence gap.
+        // Web Speech API cannot be captured by Web Audio, so we inject a
+        // silent buffer of the same approximate duration into the mix so the
+        // recording timeline stays aligned.
+        const txt=t;
+        const estimatedMs=Math.max(2000, txt.length*60);
+        speakTTS(txt);
+        injectSilence(estimatedMs).then(done);
+    }
+}
+
 function done(){isSpeaking=false;isProc=false;if(isActive){S.textContent='Listening...';S.className='st listening';B.className='btn active';startListen()}}
-function playAudio(b){return new Promise(r=>{const a=new Audio('data:audio/mp3;base64,'+b);a.onended=r;a.onerror=r;a.play().catch(r)})}
-function speakTTS(t){return new Promise(r=>{if(!synth){r();return}synth.cancel();const u=new SpeechSynthesisUtterance(t);u.rate=.9;const v=synth.getVoices();const p=v.find(x=>x.lang==='en-IN')||v.find(x=>x.lang.startsWith('en'));if(p)u.voice=p;u.onend=r;u.onerror=r;synth.speak(u);setTimeout(r,15000)})}
+
+// Decode the base64 mp3 into an AudioBuffer, play it through the AudioContext
+// (so it hits mixDest → recorder) AND through audioCtx.destination (speakers).
+// This is the only reliable cross-browser way to both play and capture audio.
+async function playAudioBuffer(b64){
+    // Ensure AudioContext is running — Chrome can suspend it between turns.
+    if(audioCtx.state==='suspended') await audioCtx.resume();
+
+    // base64 → a fresh ArrayBuffer (slice() gives ownership, required by decodeAudioData)
+    const bin=atob(b64);
+    const tmp=new Uint8Array(bin.length);
+    for(let i=0;i<bin.length;i++)tmp[i]=bin.charCodeAt(i);
+    const arrayBuf=tmp.buffer.slice(0); // owned copy — decodeAudioData detaches the original
+
+    return new Promise(resolve=>{
+        audioCtx.decodeAudioData(arrayBuf, buf=>{
+            const src=audioCtx.createBufferSource();
+            src.buffer=buf;
+            src.connect(audioCtx.destination); // → speakers
+            src.connect(mixDest);               // → recording mix bus
+            src.onended=resolve;
+            src.start(0);
+        }, e=>{
+            console.warn('Audio decode error:',e);
+            resolve();
+        });
+    });
+}
+
+// Inject a silent AudioBuffer into the mix so the recording doesn't have a
+// gap when the browser's Web Speech API is used as TTS fallback.
+function injectSilence(durationMs){
+    return new Promise(resolve=>{
+        const secs=durationMs/1000;
+        const buf=audioCtx.createBuffer(1,Math.ceil(audioCtx.sampleRate*secs),audioCtx.sampleRate);
+        const src=audioCtx.createBufferSource();
+        src.buffer=buf;
+        src.connect(mixDest); // silence into recording only, not speakers
+        src.onended=resolve;
+        src.start(0);
+    });
+}
+
+// Browser Web Speech fallback (audio not capturable, runs in parallel with injectSilence)
+function speakTTS(t){
+    const synth=window.speechSynthesis;
+    if(!synth)return;
+    synth.cancel();
+    const u=new SpeechSynthesisUtterance(t);
+    u.rate=.9;
+    const v=synth.getVoices();
+    const p=v.find(x=>x.lang==='en-IN')||v.find(x=>x.lang.startsWith('en'));
+    if(p)u.voice=p;
+    synth.speak(u);
+}
+
 function startListen(){if(!isActive||isSpeaking||isProc||!recognition)return;try{recognition.start()}catch(e){}}
 function stopListen(){if(recognition)try{recognition.stop()}catch(e){}}
 function schListen(){if(!isActive||isSpeaking||isProc)return;setTimeout(startListen,400)}
@@ -95,15 +190,40 @@ function addTx(role,t){const d=document.createElement('div');d.className='te';d.
 
 function endCall(){
     isActive=false;isSpeaking=false;isProc=false;
-    if(synth)synth.cancel();stopListen();R.classList.remove('on');
+    if(window.speechSynthesis)window.speechSynthesis.cancel();
+    stopListen();R.classList.remove('on');
     B.className='btn idle';B.innerHTML='&#128222;';S.textContent='Saving...';S.className='st proc';
-    if(rec&&rec.state!=='inactive'){rec.onstop=()=>{const b=new Blob(chunks,{type:rec.mimeType});sendRec(b,rec.mimeType);if(micStream)micStream.getTracks().forEach(t=>t.stop())};rec.stop()}
-    else{closeWS();if(micStream)micStream.getTracks().forEach(t=>t.stop())}
+    if(rec&&rec.state!=='inactive'){
+        rec.onstop=()=>{
+            const b=new Blob(chunks,{type:rec.mimeType});
+            sendRec(b,rec.mimeType);
+            if(micStream)micStream.getTracks().forEach(t=>t.stop());
+            if(micSourceNode)try{micSourceNode.disconnect()}catch(_){}
+            if(audioCtx&&audioCtx.state!=='closed')audioCtx.close().catch(()=>{});
+        };
+        rec.stop();
+    } else {
+        closeWS();
+        if(micStream)micStream.getTracks().forEach(t=>t.stop());
+    }
 }
-function sendRec(b,mt){if(b.size<1000||!ws||ws.readyState!==1){closeWS();return}const r=new FileReader();r.onload=()=>{ws.send(JSON.stringify({type:'recording',audio:r.result.split(',')[1],mimeType:mt}));setTimeout(()=>{if(ws&&ws.readyState===1)ws.send(JSON.stringify({type:'end_call'}));setTimeout(()=>{if(ws)ws.close();S.textContent='Call ended. Recording saved.';S.className='st';I.style.display='block'},300)},1000)};r.onerror=()=>closeWS();r.readAsDataURL(b)}
+
+function sendRec(b,mt){
+    if(b.size<1000||!ws||ws.readyState!==1){closeWS();return}
+    const r=new FileReader();
+    r.onload=()=>{
+        ws.send(JSON.stringify({type:'recording',audio:r.result.split(',')[1],mimeType:mt}));
+        setTimeout(()=>{
+            if(ws&&ws.readyState===1)ws.send(JSON.stringify({type:'end_call'}));
+            setTimeout(()=>{if(ws)ws.close();S.textContent='Call ended. Recording saved.';S.className='st';I.style.display='block'},300);
+        },1000);
+    };
+    r.onerror=()=>closeWS();
+    r.readAsDataURL(b);
+}
 function closeWS(){if(ws&&ws.readyState===1){ws.send(JSON.stringify({type:'end_call'}));ws.close()}S.textContent='Call ended.';S.className='st';I.style.display='block'}
 
-if(synth)synth.onvoiceschanged=()=>synth.getVoices();
+if(window.speechSynthesis)window.speechSynthesis.onvoiceschanged=()=>window.speechSynthesis.getVoices();
 (function(){const SR=window.SpeechRecognition||window.webkitSpeechRecognition;if(!SR){B.style.display='none';S.className='st err';S.textContent='Use Chrome or Edge for voice support.';I.innerHTML='<p style="color:#f4212e">Open in <strong>Chrome</strong> or <strong>Edge</strong>: http://localhost:'+location.port+'</p>'}})();
 </script>
 </body>

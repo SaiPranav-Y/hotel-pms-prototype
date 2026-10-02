@@ -1,0 +1,72 @@
+# =============================================================
+#  KS-PMS — root .gitignore
+#  Covers: Flutter/Dart, Python, Node.js, secrets, build artefacts
+# =============================================================
+
+# ── Secrets & credentials ─────────────────────────────────────
+.env
+firebase-key.json
+staff_credentials.txt
+google-services.json
+GoogleService-Info.plist
+*.pem
+*.p12
+*.key
+
+# ── Flutter / Dart ─────────────────────────────────────────────
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+build/
+*.dill
+*.dill.track.dill
+
+# ── Python ────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+.eggs/
+*.egg
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+coverage.xml
+
+# Generated PDFs (invoices, 80G certificates)
+voice-ai/app/generated/
+
+# Voice call recordings (runtime artefacts, not source)
+voice-ai/recordings/
+
+# ── Node.js ────────────────────────────────────────────────────
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ── Firestore export (local data dump, not source) ────────────
+firestore_export/
+
+# ── Graphify output ───────────────────────────────────────────
+graphify-out/
+
+# ── Kiro IDE ──────────────────────────────────────────────────
+.kiro/
+
+# ── OS ────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── IDE / editor ──────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo

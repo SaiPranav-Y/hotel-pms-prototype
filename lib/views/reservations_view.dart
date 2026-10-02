@@ -42,7 +42,8 @@ class _ReservationsViewState extends State<ReservationsView> {
         r.customerPhone.toLowerCase().contains(q) ||
         r.templeName.toLowerCase().contains(q) ||
         r.displayRoomType.toLowerCase().contains(q) ||
-        r.reservationStatus.toLowerCase().contains(q);
+        r.reservationStatus.toLowerCase().contains(q) ||
+        r.gotram.toLowerCase().contains(q);
   }
 
   void _openEditDialog(Reservation reservation) {
@@ -295,8 +296,7 @@ class _ReservationCardState extends State<_ReservationCard> {
                             const SizedBox(height: 2),
                             Text('Age: ${r.customerAge}',
                                 style: TextStyle(
-                                    fontSize: 12,
-                                    color: Colors.grey.shade500)),
+                                    fontSize: 12, color: Colors.grey.shade500)),
                           ],
                         ],
                       ),
@@ -345,6 +345,9 @@ class _ReservationCardState extends State<_ReservationCard> {
                         icon: Icons.meeting_room_rounded,
                         label:
                             '${r.noOfRooms} room${r.noOfRooms > 1 ? 's' : ''}'),
+                    if (r.gotram.isNotEmpty)
+                      _IconLabel(
+                          icon: Icons.account_balance_rounded, label: r.gotram),
                   ],
                 ),
                 const SizedBox(height: 12),
